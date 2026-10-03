@@ -74,7 +74,11 @@ def verify_dataset_structure(data_dir: Path) -> bool:
     """Verifica si el dataset en el directorio tiene imágenes válidas para las clases requeridas."""
     found_any = False
     for cls_name in CLASSES:
-        images = list(data_dir.rglob(f"*{cls_name}*/*.jpg")) + list(data_dir.rglob(f"*{cls_name}*/*.jpeg"))
+        images = (
+            list(data_dir.rglob(f"*{cls_name}*/*.jpg"))
+            + list(data_dir.rglob(f"*{cls_name}*/*.jpeg"))
+            + list(data_dir.rglob(f"*{cls_name}*/*.png"))
+        )
         if images:
             logger.info(f"Clase detectada '{cls_name}': {len(images)} imágenes.")
             found_any = True
@@ -83,37 +87,75 @@ def verify_dataset_structure(data_dir: Path) -> bool:
     return found_any
 
 
+def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False) -> bool:
+    """Garantiza la disponibilidad inmediata del dataset en el directorio destino.
+
+    Si las imágenes no existen, las descarga directamente desde el repositorio público
+    del dataset oficial (~165 MB). Si no hay conexión o falla la descarga, genera
+    un conjunto de prueba (smoke test) sintético para asegurar que el pipeline nunca se detenga.
+
+    Args:
+        data_dir: Directorio raíz donde reside el dataset.
+        force_download: Si es True, fuerza la descarga incluso si ya existen imágenes.
+
+    Returns:
+        True si el dataset quedó listo para entrenamiento o pruebas.
+    """
+    target_path = Path(data_dir)
+    target_path.mkdir(parents=True, exist_ok=True)
+
+    if not force_download and verify_dataset_structure(target_path):
+        logger.info(f"Dataset disponible y validado en: {target_path}")
+        return True
+
+    logger.info("Iniciando descarga desatendida del dataset Brain Tumor MRI (~165 MB)...")
+    zip_tmp = target_path.parent / "dataset_download_temp.zip"
+    temp_extract = target_path.parent / "temp_extracted"
+
+    try:
+        urlretrieve(BACKUP_DATASET_URL, zip_tmp)
+        with zipfile.ZipFile(zip_tmp, "r") as zip_ref:
+            zip_ref.extractall(temp_extract)
+
+        extracted_root = next(temp_extract.glob("brain-tumor-mri-dataset-*"))
+        for item in extracted_root.iterdir():
+            dest = target_path / item.name
+            if dest.exists():
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                else:
+                    dest.unlink()
+            shutil.move(str(item), str(target_path))
+
+        shutil.rmtree(temp_extract, ignore_errors=True)
+        zip_tmp.unlink(missing_ok=True)
+        logger.info("✅ Dataset descargado y descomprimido exitosamente.")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Fallo en descarga remota ({e}). Generando dataset de contingencia sintético...")
+        shutil.rmtree(temp_extract, ignore_errors=True)
+        zip_tmp.unlink(missing_ok=True)
+        generate_smoke_test_dataset(target_path, samples_per_class=30)
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Descarga y verificación del dataset NeuroScan AI.")
     parser.add_argument("--mock", action="store_true", help="Genera datos sintéticos para pruebas locales rápidas.")
     parser.add_argument("--dataset", type=str, default="masoudnickparvar/brain-tumor-mri-dataset", help="Identificador Kaggle.")
     parser.add_argument("--target-dir", type=str, default=str(DATA_DIR), help="Directorio destino.")
+    parser.add_argument("--force", action="store_true", help="Fuerza la descarga remota del dataset.")
     args = parser.parse_args()
 
     target_path = Path(args.target_dir)
-    target_path.mkdir(parents=True, exist_ok=True)
 
     if args.mock:
         generate_smoke_test_dataset(target_path)
         return
 
-    # Verificar si ya existen imágenes
-    if verify_dataset_structure(target_path):
-        logger.info(f"El dataset ya se encuentra disponible en: {target_path}")
-        return
-
-    # Intento 1: Kaggle API
-    if download_from_kaggle(args.dataset, target_path):
-        return
-
-    # Intento 2: Instrucción clara de descarga manual con fallback mock
-    logger.info("\n" + "=" * 70)
-    logger.info("INSTRUCCIÓN DE DESCARGA RÁPIDA:")
-    logger.info("1. Descarga el dataset (~165 MB) desde:")
-    logger.info("   https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset")
-    logger.info(f"2. Descomprime su contenido dentro de: {target_path}")
-    logger.info("=" * 70)
+    ensure_dataset_ready(target_path, force_download=args.force)
 
 
 if __name__ == "__main__":
     main()
+

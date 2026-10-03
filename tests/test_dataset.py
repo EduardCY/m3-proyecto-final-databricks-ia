@@ -43,9 +43,9 @@ def test_verify_image_integrity(mock_dataset_dir: Path):
     assert verify_image_integrity(corrupt_img) is False
 
 
-def test_build_manifest(mock_dataset_dir: Path):
+def test_build_manifest(mock_dataset_dir: Path, tmp_path: Path):
     """Verifica que build_manifest cargue todas las clases y descarte corruptos."""
-    df = build_manifest(mock_dataset_dir, use_cache=False)
+    df = build_manifest(mock_dataset_dir, use_cache=False, output_path=tmp_path / "manifest.csv")
 
     assert not df.empty
     assert set(df["label_name"].unique()) == set(CLASSES)
@@ -54,10 +54,10 @@ def test_build_manifest(mock_dataset_dir: Path):
     assert all(col in df.columns for col in ["path", "filename", "label", "label_name", "split" if "split" in df.columns else "file_size_bytes"])
 
 
-def test_split_manifest_no_leakage(mock_dataset_dir: Path):
+def test_split_manifest_no_leakage(mock_dataset_dir: Path, tmp_path: Path):
     """Verifica que el split no tenga fuga de datos (intersección nula entre conjuntos)."""
-    df = build_manifest(mock_dataset_dir, use_cache=False)
-    split_df = split_manifest(df, split_ratios=SPLIT_RATIOS, seed=42)
+    df = build_manifest(mock_dataset_dir, use_cache=False, output_path=tmp_path / "manifest.csv")
+    split_df = split_manifest(df, split_ratios=SPLIT_RATIOS, seed=42, output_path=tmp_path / "manifest_split.csv")
 
     train_paths = set(split_df[split_df["split"] == "train"]["path"])
     val_paths = set(split_df[split_df["split"] == "val"]["path"])
@@ -72,3 +72,4 @@ def test_split_manifest_no_leakage(mock_dataset_dir: Path):
     for s in ["train", "val", "test"]:
         classes_in_split = set(split_df[split_df["split"] == s]["label_name"])
         assert classes_in_split == set(CLASSES), f"El split {s} no contiene todas las clases requeridas"
+

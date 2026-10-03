@@ -69,22 +69,31 @@ def _extract_subject_id(filename: str, label_name: str) -> str:
     return f"{label_name}_{filename}"
 
 
-def build_manifest(data_dir: Path = DATA_DIR, use_cache: bool = True) -> pd.DataFrame:
+def build_manifest(
+    data_dir: Path = DATA_DIR,
+    use_cache: bool = True,
+    output_path: Optional[Path] = None,
+    save_to_disk: bool = True,
+) -> pd.DataFrame:
     """Recorre las subcarpetas del dataset y genera un manifiesto estructurado.
 
     Descarta automáticamente archivos que no sean imágenes o que estén corruptos.
-    Guarda el resultado en `data/manifest.csv` como punto de guardado (checkpoint).
+    Guarda el resultado en `output_path` (por defecto `data/manifest.csv`) como punto de guardado.
 
     Args:
         data_dir: Directorio raíz donde reside el dataset.
         use_cache: Si es True y existe un manifest.csv previo, se reutiliza.
+        output_path: Ruta personalizada para guardar o leer la caché del manifiesto.
+        save_to_disk: Si es True, persiste el DataFrame en formato CSV.
 
     Returns:
         DataFrame con columnas: path, filename, label, label_name, subject_id, file_size, origin_split.
     """
-    if use_cache and MANIFEST_PATH.exists():
-        logger.info(f"Cargando manifiesto desde caché: {MANIFEST_PATH}")
-        df = pd.read_csv(MANIFEST_PATH)
+    target_manifest_path = Path(output_path) if output_path else MANIFEST_PATH
+
+    if use_cache and target_manifest_path.exists():
+        logger.info(f"Cargando manifiesto desde caché: {target_manifest_path}")
+        df = pd.read_csv(target_manifest_path)
         if not df.empty:
             return df
 
@@ -135,9 +144,10 @@ def build_manifest(data_dir: Path = DATA_DIR, use_cache: bool = True) -> pd.Data
         )
 
     # Guardar punto de guardado (checkpoint)
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df_manifest.to_csv(MANIFEST_PATH, index=False)
-    logger.info(f"Manifiesto generado con {len(df_manifest)} imágenes. Guardado en: {MANIFEST_PATH}")
+    if save_to_disk:
+        target_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        df_manifest.to_csv(target_manifest_path, index=False)
+        logger.info(f"Manifiesto generado con {len(df_manifest)} imágenes. Guardado en: {target_manifest_path}")
     return df_manifest
 
 

@@ -5,11 +5,32 @@ Implementa decodificación segura de 3 canales, normalización específica de pe
 de ImageNet, Data Augmentation clínicamente seguro y optimización con prefetch.
 """
 
+import os
+from pathlib import Path
 import tensorflow as tf
 from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 
-from src.config import BATCH_SIZE, IMG_CHANNELS, IMG_SIZE, NUM_CLASSES, SEED
+from src.config import BATCH_SIZE, IMG_CHANNELS, IMG_SIZE, NUM_CLASSES, PROJECT_ROOT, SEED
+
+
+def _resolve_image_path(raw_path: str, project_root: Path) -> str:
+    """Resuelve la ruta de la imagen asegurando compatibilidad multiplataforma (Windows/Linux/Colab)."""
+    p = Path(raw_path)
+    if p.is_file():
+        return str(p.resolve())
+
+    # Fallback 1: Buscar relativo a data/raw con la subcarpeta de clase
+    candidate = project_root / "data" / "raw" / p.parent.name / p.name
+    if candidate.is_file():
+        return str(candidate.resolve())
+
+    # Fallback 2: Buscar en data/raw recursivamente por nombre de archivo
+    matches = list((project_root / "data" / "raw").rglob(p.name))
+    if matches:
+        return str(matches[0].resolve())
+
+    return str(p)
 
 
 def augment_image_clinically_safe(image: tf.Tensor) -> tf.Tensor:
@@ -83,7 +104,7 @@ def create_tf_dataset(
     if split_df.empty:
         raise ValueError(f"No hay registros en el DataFrame para el split '{split_name}'.")
 
-    paths = split_df["path"].values
+    paths = [_resolve_image_path(str(p), PROJECT_ROOT) for p in split_df["path"].values]
     labels = split_df["label"].values
 
     dataset = tf.data.Dataset.from_tensor_slices((paths, labels))

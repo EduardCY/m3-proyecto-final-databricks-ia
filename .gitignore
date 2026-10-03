@@ -1,0 +1,54 @@
+# Entornos virtuales
+.venv/
+env/
+venv/
+ENV/
+
+# Datos crudos pesados y binarios de imágenes
+data/raw/
+data/checkpoints/
+archive*/
+*.zip
+*.tar.gz
+*.jpeg
+*.jpg
+*.png
+
+# Artefactos de modelos pesados (se versionan en Google Drive / MLflow Registry)
+models/*.keras
+models/*.h5
+models/checkpoints/
+!models/checkpoints/.gitkeep
+
+# MLflow local
+mlflow.db
+mlflow.db-journal
+mlruns/
+.trash/
+
+# Python cache & testing
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secretos y credenciales (OWASP)
+.env
+.env.*
+kaggle.json
+*.pem
+credentials.json
+
+# Checkpoints de Jupyter
+.ipynb_checkpoints/
+
+# Sincronización Google Drive local
+drive_sync/
+gdrive/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini

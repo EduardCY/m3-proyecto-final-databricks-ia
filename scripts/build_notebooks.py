@@ -57,10 +57,13 @@ import sys
 
 # Detección y preparación autónoma para Google Colab
 if 'google.colab' in sys.modules:
-    # 1. Clonar el repositorio público en /content si no existe
+    # 1. Clonar o actualizar el repositorio público en /content
     if not os.path.exists('/content/m3-proyecto-final-databricks-ia'):
         print("🚀 Clonando repositorio NeuroScan AI en Google Colab...")
         !git clone https://github.com/EduardCY/m3-proyecto-final-databricks-ia.git /content/m3-proyecto-final-databricks-ia
+    else:
+        print("🔄 Actualizando repositorio con los últimos cambios de GitHub...")
+        !git -C /content/m3-proyecto-final-databricks-ia pull origin main
     
     # 2. Posicionarse en la carpeta raíz del proyecto
     %cd /content/m3-proyecto-final-databricks-ia
@@ -68,12 +71,18 @@ if 'google.colab' in sys.modules:
     # 3. Instalar dependencias requeridas para Colab (MLflow, etc.)
     !pip install -q -r requirements-colab.txt
 
-# 4. Asegurar que la raíz del proyecto está en el PYTHONPATH
+    # 4. Limpiar módulos en caché para recargar cambios de código
+    for mod in list(sys.modules.keys()):
+        if mod.startswith('src') or mod.startswith('scripts'):
+            del sys.modules[mod]
+
+# 5. Asegurar que la raíz del proyecto está en el PYTHONPATH
 PROJECT_ROOT = os.getcwd()
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 print(f"✅ Entorno preparado en: {PROJECT_ROOT}")"""
+
 
 
 # ==============================================================================
@@ -147,7 +156,7 @@ else:
     ),
     md_cell("### 4. Particionamiento Estratificado y Auditoría de Cero Fuga"),
     code_cell(
-        """df_split = split_manifest(manifest_df, ratios=SPLIT_RATIOS, seed=SEED, output_path=SPLIT_MANIFEST_PATH)
+        """df_split = split_manifest(manifest_df, split_ratios=SPLIT_RATIOS, seed=SEED, output_path=SPLIT_MANIFEST_PATH)
 print("Partición estratificada generada:")
 print(df_split.groupby(["split", "label_name"]).size().unstack())
 
@@ -325,14 +334,14 @@ else:
     code_cell(
         """# 4. Auditoría y Construcción de Datasets tf.data
 import pandas as pd
-from src.dataset import build_manifest, create_stratified_split
+from src.dataset import build_manifest, split_manifest, create_stratified_split
 from src.config import BATCH_SIZE, CLASSES, SPLIT_MANIFEST_PATH
 from src.preprocessing import create_tf_dataset
 from src.train import train_and_log_run
 
 # Generar manifiesto con rutas del entorno actual
 df_manifest = build_manifest(data_dir=data_raw, use_cache=False)
-df_split = create_stratified_split(df_manifest, output_path=SPLIT_MANIFEST_PATH)
+df_split = split_manifest(df_manifest, output_path=SPLIT_MANIFEST_PATH)
 print(f"✅ Manifiesto y Split generados con {len(df_split)} imágenes:")
 print(df_split.groupby(["split", "label_name"]).size().unstack())
 
@@ -425,10 +434,22 @@ Este notebook implementa la **Etapa 5**:
     code_cell(COLAB_BOOTSTRAP_CODE),
     code_cell(
         """import sys
+import os
 from pathlib import Path
 PROJECT_ROOT = Path.cwd().resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# Sincronización con Google Drive si estamos en Google Colab
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    from scripts.sync_drive import restore_from_gdrive
+    if not (PROJECT_ROOT / "mlflow.db").exists():
+        print("📥 Restaurando mlflow.db y artefactos desde Google Drive...")
+        restore_from_gdrive()
+except Exception as e:
+    print(f"Modo local o aviso de Google Drive: {e}")
 
 import shutil
 import mlflow
@@ -465,7 +486,10 @@ if experiment:
             "epochs": r.data.params.get("epochs", "N/A"),
         })
     df_runs = pd.DataFrame(records)
-    print(df_runs.to_markdown(index=False))
+    try:
+        print(df_runs.to_markdown(index=False))
+    except Exception:
+        print(df_runs.to_string(index=False))
 else:
     print(f"No se encontró experimento con nombre {MLFLOW_EXPERIMENT_NAME}. Verifique MLFLOW_TRACKING_URI.")"""
     ),
@@ -515,8 +539,12 @@ databricks_roadmap = [
 ]
 
 df_roadmap = pd.DataFrame(databricks_roadmap)
-print(df_roadmap.to_markdown(index=False))"""
+try:
+    print(df_roadmap.to_markdown(index=False))
+except Exception:
+    print(df_roadmap.to_string(index=False))"""
     ),
+
 ]
 
 

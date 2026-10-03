@@ -143,22 +143,29 @@ def build_manifest(data_dir: Path = DATA_DIR, use_cache: bool = True) -> pd.Data
 
 def split_manifest(
     manifest_df: pd.DataFrame,
-    split_ratios: dict = SPLIT_RATIOS,
+    split_ratios: Optional[dict] = None,
+    ratios: Optional[dict] = None,
     seed: int = SEED,
+    output_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """Genera una partición estratificada 70/15/15 sin fuga de información.
 
     Garantiza que la distribución de clases se mantenga constante entre conjuntos.
-    Guarda el resultado en `data/manifest_split.csv` como punto de guardado.
+    Guarda el resultado en `output_path` (por defecto `data/manifest_split.csv`).
 
     Args:
         manifest_df: DataFrame con el manifiesto completo.
         split_ratios: Proporciones deseadas (train, val, test).
+        ratios: Alias de compatibilidad para split_ratios.
         seed: Semilla para reproducibilidad estricta.
+        output_path: Ruta de guardado para el archivo CSV del split.
 
     Returns:
         DataFrame con la columna añadida 'split' ('train', 'val', 'test').
     """
+    effective_ratios = split_ratios or ratios or SPLIT_RATIOS
+    target_output_path = Path(output_path) if output_path else SPLIT_MANIFEST_PATH
+
     df = manifest_df.copy()
     rng = np.random.default_rng(seed)
 
@@ -171,8 +178,8 @@ def split_manifest(
         rng.shuffle(cls_indices)
 
         n_total = len(cls_indices)
-        n_train = int(n_total * split_ratios["train"])
-        n_val = int(n_total * split_ratios["val"])
+        n_train = int(n_total * effective_ratios["train"])
+        n_val = int(n_total * effective_ratios["val"])
 
         train_idx = cls_indices[:n_train]
         val_idx = cls_indices[n_train : n_train + n_val]
@@ -182,16 +189,21 @@ def split_manifest(
         df.loc[val_idx, "split"] = "val"
         df.loc[test_idx, "split"] = "test"
 
-    SPLIT_MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(SPLIT_MANIFEST_PATH, index=False)
+    target_output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(target_output_path, index=False)
     logger.info(
         f"Split estratificado completado: "
         f"Train={sum(df['split'] == 'train')}, "
         f"Val={sum(df['split'] == 'val')}, "
         f"Test={sum(df['split'] == 'test')}. "
-        f"Guardado en: {SPLIT_MANIFEST_PATH}"
+        f"Guardado en: {target_output_path}"
     )
     return df
+
+
+# Alias de compatibilidad para notebooks y scripts
+create_stratified_split = split_manifest
+
 
 
 def build_manifest_spark(data_dir: Path = DATA_DIR):
@@ -222,3 +234,14 @@ def build_manifest_spark(data_dir: Path = DATA_DIR):
     )
 
     return manifest_spark
+
+
+__all__ = [
+    "compute_file_hash",
+    "verify_image_integrity",
+    "build_manifest",
+    "split_manifest",
+    "create_stratified_split",
+    "build_manifest_spark",
+]
+

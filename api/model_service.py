@@ -75,6 +75,17 @@ class NeuroScanModelService:
         """Comprueba si el modelo está instanciado y listo para inferir."""
         return self.model is not None
 
+    def warm_up(self) -> None:
+        """Ejecuta una inferencia sintética para compilar el grafo y reducir latencia en el primer request."""
+        if self.model is not None:
+            dummy_batch = np.zeros((1, *IMG_SIZE, IMG_CHANNELS), dtype=np.float32)
+            try:
+                self.model.predict(dummy_batch, verbose=0)
+                logger.info("Warm-up del modelo completado con éxito.")
+            except Exception as e:
+                logger.warning(f"Aviso durante warm-up del modelo: {e}")
+
+
     def predict_image_bytes(self, image_bytes: bytes) -> dict:
         """Procesa una imagen en memoria y devuelve la predicción con probabilidades.
 

@@ -60,9 +60,12 @@ def plot_multiclass_roc_curve(
     """Genera curvas ROC One-vs-Rest para cada una de las 4 patologías."""
     plt.figure(figsize=(8, 6))
     for i, cls_name in enumerate(classes):
-        fpr, tpr, _ = roc_curve(y_true_onehot[:, i], y_prob[:, i])
-        auc_val = roc_auc_score(y_true_onehot[:, i], y_prob[:, i])
-        plt.plot(fpr, tpr, label=f"{cls_name} (AUC = {auc_val:.3f})")
+        try:
+            fpr, tpr, _ = roc_curve(y_true_onehot[:, i], y_prob[:, i])
+            auc_val = roc_auc_score(y_true_onehot[:, i], y_prob[:, i])
+            plt.plot(fpr, tpr, label=f"{cls_name} (AUC = {auc_val:.3f})")
+        except Exception:
+            plt.plot([0, 1], [0, 1], ":", label=f"{cls_name} (AUC N/A)")
 
     plt.plot([0, 1], [0, 1], "k--", label="Clasificador Azar")
     plt.xlim([0.0, 1.0])
@@ -119,13 +122,19 @@ def compute_comprehensive_metrics(
     y_pred = np.argmax(y_prob, axis=1)
     y_true_onehot = np.eye(len(classes))[y_true]
 
+    try:
+        multiclass_auc = float(roc_auc_score(y_true_onehot, y_prob, multi_class="ovr"))
+    except Exception:
+        multiclass_auc = 0.0
+
     metrics = {
-        "test_macro_f1": float(f1_score(y_true, y_pred, average="macro")),
-        "test_weighted_f1": float(f1_score(y_true, y_pred, average="weighted")),
+        "test_macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+        "test_weighted_f1": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
         "test_macro_precision": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
         "test_macro_recall": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
-        "test_multiclass_auc": float(roc_auc_score(y_true_onehot, y_prob, multi_class="ovr")),
+        "test_multiclass_auc": multiclass_auc,
     }
 
     report_str = classification_report(y_true, y_pred, target_names=classes, zero_division=0)
     return metrics, report_str
+

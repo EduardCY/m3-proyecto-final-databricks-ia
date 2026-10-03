@@ -5,6 +5,7 @@ Expone endpoints para monitoreo (/health), clasificación de imágenes (/predict
 y generación de reportes explicativos asistidos por Google AI Pro (/predict_explained).
 """
 
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -31,9 +32,10 @@ MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB límite de seguridad (OWASP)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Inicializa el modelo de deep learning una sola vez al arrancar el servidor."""
+    """Inicializa el modelo de deep learning y ejecuta un ciclo de warm-up."""
     logger.info("Inicializando servicio de inferencia NeuroScan AI...")
-    NeuroScanModelService.get_instance()
+    service = NeuroScanModelService.get_instance()
+    service.warm_up()
     logger.info("Servicio de inferencia listo para recibir peticiones.")
     yield
 
@@ -74,13 +76,8 @@ async def health_check():
     )
 
 
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-    summary="Clasificar una imagen de resonancia magnética",
-)
-async def predict_mri(file: UploadFile = File(...)):
-    """Recibe un archivo de imagen (JPEG/PNG) y devuelve la predicción con probabilidades."""
+async def _validate_and_read_image(file: UploadFile) -> bytes:
+    """Valida formato MIME y tamaño del archivo de forma no bloqueante."""
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -93,10 +90,21 @@ async def predict_mri(file: UploadFile = File(...)):
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"El archivo supera el tamaño máximo permitido de 10 MB.",
         )
+    return file_bytes
 
+
+@app.post(
+    "/predict",
+    response_model=PredictionResponse,
+    summary="Clasificar una imagen de resonancia magnética",
+)
+async def predict_mri(file: UploadFile = File(...)):
+    """Recibe un archivo de imagen (JPEG/PNG) y devuelve la predicción con probabilidades."""
+    file_bytes = await _validate_and_read_image(file)
     service = NeuroScanModelService.get_instance()
+
     try:
-        result = service.predict_image_bytes(file_bytes)
+        result = await asyncio.to_thread(service.predict_image_bytes, file_bytes)
         return PredictionResponse(
             predicted_class=result["predicted_class"],
             confidence=result["confidence"],
@@ -119,14 +127,26 @@ async def predict_mri(file: UploadFile = File(...)):
 )
 async def predict_with_explanation(file: UploadFile = File(...)):
     """Clasifica la resonancia y genera una justificación radiológica con Google Gemini."""
-    base_prediction = await predict_mri(file)
-    predicted_class = base_prediction.predicted_class
-    confidence = base_prediction.confidence
+    file_bytes = await _validate_and_read_image(file)
+    service = NeuroScanModelService.get_instance()
+
+    try:
+        result = await asyncio.to_thread(service.predict_image_bytes, file_bytes)
+    except Exception as e:
+        logger.error(f"Error procesando la imagen en predict_explained: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No se pudo decodificar el archivo como una imagen médica válida.",
+        )
+
+    predicted_class = result["predicted_class"]
+    confidence = result["confidence"]
 
     # Failsafe: Guía radiológica offline si la API de Gemini no está configurada o falla
     clinical_rationale = ""
     suggested_protocols = []
     provider = "Offline Clinical Fallback"
+
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if gemini_api_key:
@@ -180,12 +200,13 @@ async def predict_with_explanation(file: UploadFile = File(...)):
         )
 
     return ExplainedPredictionResponse(
-        predicted_class=base_prediction.predicted_class,
-        confidence=base_prediction.confidence,
-        probabilities=base_prediction.probabilities,
-        model_version=base_prediction.model_version,
-        disclaimer=base_prediction.disclaimer,
+        predicted_class=result["predicted_class"],
+        confidence=result["confidence"],
+        probabilities=result["probabilities"],
+        model_version=result["model_version"],
+        disclaimer=MEDICAL_DISCLAIMER,
         clinical_rationale=clinical_rationale,
         suggested_mri_protocols=suggested_protocols if suggested_protocols else ["T1 con contraste", "T2 FLAIR"],
         ai_assistant_provider=provider,
     )
+

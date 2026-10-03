@@ -221,26 +221,76 @@ def build_manifest_spark(data_dir: Path = DATA_DIR):
 
     Utiliza `spark.read.format('binaryFile')` tal como se ejecutaría sobre
     un Data Lake / Unity Catalog con cientos de miles de imágenes médicas.
+    El esquema resultante replica el del manifiesto pandas (`label_name`, `label`,
+    `origin_split`) para que ambas rutas sean intercambiables.
+
+    Args:
+        data_dir: Directorio raíz con las carpetas de clases.
+
+    Returns:
+        DataFrame de Spark con columnas path, filename, raw_folder, label_name,
+        label, origin_split y file_size_bytes; o None si Spark/Java no está disponible.
     """
-    from pyspark.sql import SparkSession
-    from pyspark.sql import functions as F
+    try:
+        from pyspark.sql import SparkSession
+        from pyspark.sql import functions as F
+    except ImportError:
+        logger.warning("PySpark no está instalado; se omite el manifiesto distribuido.")
+        return None
 
-    spark = SparkSession.builder.appName("NeuroScan_Spark_Manifest").getOrCreate()
-    binary_df = (
-        spark.read.format("binaryFile")
-        .option("recursiveFileLookup", "true")
-        .load(str(data_dir))
-    )
+    try:
+        spark = SparkSession.builder.appName("NeuroScan_Spark_Manifest").getOrCreate()
+        binary_df = (
+            spark.read.format("binaryFile")
+            .option("recursiveFileLookup", "true")
+            # Excluye el contenido binario del plan: solo se necesitan metadatos.
+            .load(str(data_dir))
+            .drop("content")
+        )
+    except Exception as e:  # Java ausente, ruta inexistente, etc.
+        logger.warning(f"Spark no pudo inicializarse o leer {data_dir}: {e}")
+        return None
 
-    # Extraer nombre de archivo y clase
+    path_parts = F.split(F.col("path"), "/")
+    raw_folder = F.lower(F.element_at(path_parts, -2))
+
+    # Mapeo explícito carpeta -> clase canónica. No se usa regexp_replace("tumor$")
+    # porque convertiría 'notumor' en 'no'.
+    label_name_expr = None
+    for cls_name in CLASSES:
+        cond = (raw_folder == cls_name) | (raw_folder == f"{cls_name}tumor")
+        label_name_expr = (
+            F.when(cond, F.lit(cls_name))
+            if label_name_expr is None
+            else label_name_expr.when(cond, F.lit(cls_name))
+        )
+
+    label_idx_expr = None
+    for cls_name, idx in CLASS_TO_IDX.items():
+        cond = F.col("label_name") == cls_name
+        label_idx_expr = (
+            F.when(cond, F.lit(idx))
+            if label_idx_expr is None
+            else label_idx_expr.when(cond, F.lit(idx))
+        )
+
     manifest_spark = (
         binary_df.select(
             F.col("path"),
             F.col("length").alias("file_size_bytes"),
-            F.element_at(F.split(F.col("path"), "/"), -1).alias("filename"),
-            F.element_at(F.split(F.col("path"), "/"), -2).alias("raw_folder"),
+            F.element_at(path_parts, -1).alias("filename"),
+            raw_folder.alias("raw_folder"),
         )
-        .filter(F.col("filename").rlike(r"\.(jpg|jpeg|png)$"))
+        .filter(F.lower(F.col("filename")).rlike(r"\.(jpg|jpeg|png)$"))
+        .withColumn("label_name", label_name_expr)
+        .filter(F.col("label_name").isNotNull())
+        .withColumn("label", label_idx_expr)
+        .withColumn(
+            "origin_split",
+            F.when(F.lower(F.col("path")).contains("train"), F.lit("Training")).otherwise(
+                F.lit("Testing")
+            ),
+        )
     )
 
     return manifest_spark

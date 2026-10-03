@@ -73,3 +73,22 @@ def test_split_manifest_no_leakage(mock_dataset_dir: Path, tmp_path: Path):
         classes_in_split = set(split_df[split_df["split"] == s]["label_name"])
         assert classes_in_split == set(CLASSES), f"El split {s} no contiene todas las clases requeridas"
 
+
+def test_build_manifest_spark_schema_parity(mock_dataset_dir: Path):
+    """Verifica que el manifiesto Spark exponga `label_name` y coincida en conteo con pandas."""
+    pytest.importorskip("pyspark")
+    from src.dataset import build_manifest_spark
+
+    spark_df = build_manifest_spark(mock_dataset_dir)
+    if spark_df is None:
+        pytest.skip("Spark/Java no disponible en este entorno.")
+
+    assert {"label_name", "label", "origin_split"}.issubset(set(spark_df.columns))
+
+    counts = {row["label_name"]: row["count"] for row in spark_df.groupBy("label_name").count().collect()}
+    assert set(counts) == set(CLASSES)
+    # Spark no valida integridad de imagen: el archivo corrupto sí se contabiliza.
+    expected = {cls: 10 for cls in CLASSES}
+    expected[CLASSES[0]] += 1
+    assert counts == expected
+

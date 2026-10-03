@@ -123,7 +123,12 @@ print(f"Clases a clasificar: {CLASSES}")"""
     ),
     md_cell("### 1. Construcción del Manifiesto con Auditoría de Integridad"),
     code_cell(
-        """# Construir el manifiesto auditando imágenes corruptas
+        """# Asegurar descarga y estructura del dataset
+from scripts.download_dataset import ensure_dataset_ready
+
+ensure_dataset_ready(DATA_DIR)
+
+# Construir el manifiesto auditando imágenes corruptas
 manifest_df = build_manifest(data_dir=DATA_DIR, use_cache=False)
 print(f"Total imágenes válidas: {len(manifest_df)}")
 manifest_df.head()"""
@@ -211,7 +216,18 @@ print(f"Dispositivos disponibles: {tf.config.list_physical_devices()}")"""
     ),
     md_cell("### 1. Cargar el Split de Datos"),
     code_cell(
-        """df_split = pd.read_csv(SPLIT_MANIFEST_PATH)
+        """from scripts.download_dataset import ensure_dataset_ready
+from src.dataset import build_manifest, split_manifest
+from src.config import DATA_DIR, SPLIT_MANIFEST_PATH
+
+ensure_dataset_ready(DATA_DIR)
+if not SPLIT_MANIFEST_PATH.exists():
+    print("Partición no encontrada en disco. Generando split estratificado...")
+    manifest_df = build_manifest(data_dir=DATA_DIR, use_cache=False)
+    df_split = split_manifest(manifest_df, output_path=SPLIT_MANIFEST_PATH)
+else:
+    df_split = pd.read_csv(SPLIT_MANIFEST_PATH)
+
 print("Resumen de splits:")
 print(df_split.groupby(["split", "label_name"]).size().unstack())"""
     ),
@@ -294,42 +310,12 @@ except Exception as e:
     ),
     code_cell(
         """# 3. Verificación y Descarga del Dataset de Resonancias
-import os
-import shutil
-import urllib.request
-import zipfile
 from pathlib import Path
-from scripts.download_dataset import verify_dataset_structure, generate_smoke_test_dataset
+from scripts.download_dataset import ensure_dataset_ready
 
 data_raw = Path("data/raw")
-data_raw.mkdir(parents=True, exist_ok=True)
-
-if not verify_dataset_structure(data_raw):
-    print("📥 Descargando dataset Brain Tumor MRI (~165 MB)...")
-    zip_url = "https://github.com/masoudnickparvar/brain-tumor-mri-dataset/archive/refs/heads/main.zip"
-    zip_tmp = Path("data/dataset_archive.zip")
-    try:
-        urllib.request.urlretrieve(zip_url, zip_tmp)
-        with zipfile.ZipFile(zip_tmp, 'r') as zip_ref:
-            zip_ref.extractall("data/temp_extracted")
-        
-        extracted_root = next(Path("data/temp_extracted").glob("brain-tumor-mri-dataset-*"))
-        for item in extracted_root.iterdir():
-            dest = data_raw / item.name
-            if dest.exists():
-                if dest.is_dir():
-                    shutil.rmtree(dest)
-                else:
-                    dest.unlink()
-            shutil.move(str(item), str(data_raw))
-        shutil.rmtree("data/temp_extracted", ignore_errors=True)
-        zip_tmp.unlink(missing_ok=True)
-        print("✅ Dataset descargado y descomprimido exitosamente en data/raw/")
-    except Exception as e:
-        print(f"⚠️ Fallo en descarga remota: {e}. Generando dataset de contingencia para pruebas...")
-        generate_smoke_test_dataset(data_raw, samples_per_class=30)
-else:
-    print(f"✅ Dataset disponible en: {data_raw}")"""
+ensure_dataset_ready(data_raw)
+print(f"✅ Dataset listo en: {data_raw}")"""
     ),
     code_cell(
         """# 4. Auditoría y Construcción de Datasets tf.data
@@ -472,6 +458,7 @@ client = MlflowClient()"""
     md_cell("### 1. Tabla Comparativa de Experimentos"),
     code_cell(
         """experiment = client.get_experiment_by_name(MLFLOW_EXPERIMENT_NAME)
+runs = []
 if experiment:
     runs = client.search_runs(experiment_ids=[experiment.experiment_id], order_by=["metrics.test_macro_f1 DESC"])
     records = []
@@ -486,10 +473,13 @@ if experiment:
             "epochs": r.data.params.get("epochs", "N/A"),
         })
     df_runs = pd.DataFrame(records)
-    try:
-        print(df_runs.to_markdown(index=False))
-    except Exception:
-        print(df_runs.to_string(index=False))
+    if not df_runs.empty:
+        try:
+            print(df_runs.to_markdown(index=False))
+        except Exception:
+            print(df_runs.to_string(index=False))
+    else:
+        print(f"No hay corridas registradas en el experimento '{MLFLOW_EXPERIMENT_NAME}'.")
 else:
     print(f"No se encontró experimento con nombre {MLFLOW_EXPERIMENT_NAME}. Verifique MLFLOW_TRACKING_URI.")"""
     ),
@@ -515,18 +505,30 @@ if best_run:
         stage="Staging",
         archive_existing_versions=True
     )
-    print(f"🚀 Versión {reg_model.version} promovida formalmente a 'Staging'.")"""
+    print(f"🚀 Versión {reg_model.version} promovida formalmente a 'Staging'.")
+else:
+    print("⚠️ No hay corridas disponibles para registrar en el Model Registry.")"""
     ),
     md_cell("### 3. Exportación Atómica de Modelo a Disco"),
     code_cell(
         """# Asegurar que el modelo .keras de producción se guarde en models/
 if best_run:
-    best_model_local = client.download_artifacts(best_run_id, "model/data/model.keras", dst_path=str(MODELS_DIR))
-    if Path(best_model_local).exists():
-        shutil.copy(best_model_local, str(FINAL_MODEL_PATH))
+    try:
+        best_model_local = client.download_artifacts(best_run_id, "model/data/model.keras", dst_path=str(MODELS_DIR))
+    except Exception:
+        best_model_local = client.download_artifacts(best_run_id, "model", dst_path=str(MODELS_DIR))
+    
+    # Localizar archivo .keras y asegurar su presencia en FINAL_MODEL_PATH
+    keras_files = list(Path(MODELS_DIR).rglob("*.keras"))
+    if keras_files:
+        selected_model = keras_files[0]
+        if selected_model.resolve() != FINAL_MODEL_PATH.resolve():
+            shutil.copy(selected_model, str(FINAL_MODEL_PATH))
         print(f"✅ Modelo desacoplado exportado exitosamente a: {FINAL_MODEL_PATH}")
     else:
-        print(f"⚠️ Artefacto copiado directamente a models/: {FINAL_MODEL_PATH}")"""
+        print(f"⚠️ Artefacto descargado pero no se halló un .keras individual en: {MODELS_DIR}")
+else:
+    print(f"⚠️ Sin corridas para exportar. Modelo local de producción esperado en: {FINAL_MODEL_PATH}")"""
     ),
     md_cell("### 4. Roadmap Técnico: Transición a Databricks (Fase 2)"),
     code_cell(

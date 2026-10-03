@@ -134,6 +134,17 @@ m3-proyecto-final-databricks-ia/
 └── README.md
 ```
 
+### 📓 Catálogo y Ejecución de Notebooks (Interactivos en Google Colab)
+
+Cada etapa del ciclo de vida del pipeline cuenta con un notebook interactivo ejecutable tanto localmente como en la nube con un solo clic:
+
+| Notebook | Etapa MLOps | Contenido y Objetivos Clave | Ejecución Interactiva |
+|---|---|---|---|
+| **`01_exploracion_eda.ipynb`** | **Etapa 1:** Ingesta & Auditoría | Filtrado de imágenes corruptas (`PIL.Image.verify`), balance de 4 clases, split estratificado 70/15/15 sin fuga y parser distribuido en PySpark. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/01_exploracion_eda.ipynb) |
+| **`02_preprocessing.ipynb`** | **Etapa 2:** Pipeline `tf.data` | Expansión a 3 canales RGB para resonancias en escala de grises, normalización ImageNet BGR, aumentos selectivos y optimización con `prefetch(AUTOTUNE)`. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/02_preprocessing.ipynb) |
+| **`03_training_colab_mlflow.ipynb`** | **Etapa 3 & 4:** Transfer Learning | Detección GPU A100/V100, Mixed Precision FP16, sincronización con Google Drive y tracking de 5 experimentos en MLflow SQLite. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/03_training_colab_mlflow.ipynb) |
+| **`04_evaluation_registry.ipynb`** | **Etapa 5:** Registry & Databricks | Análisis comparativo de métricas, registro formal del modelo campeón en MLflow Model Registry (Staging), exportación `.keras` y roadmap a Databricks (Fase 2). | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/04_evaluation_registry.ipynb) |
+
 ---
 
 ## 5. Guía de Ejecución Rápida

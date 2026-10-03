@@ -59,6 +59,8 @@ nb1_cells = [
         """# NeuroScan AI: Exploración de Datos, Manifiesto y Auditoría de Fuga
 ## Módulo 3: Databricks e IA Aplicada - Proyecto Final
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/01_exploracion_eda.ipynb)
+
 Este notebook implementa la **Etapa 1** del pipeline:
 1. Verificación de integridad y descarte de imágenes corruptas.
 2. Generación del manifiesto estructurado con `pandas` y el paso equivalente en `PySpark`.
@@ -147,6 +149,8 @@ nb2_cells = [
         """# NeuroScan AI: Preprocesamiento y Pipeline tf.data
 ## Módulo 3: Databricks e IA Aplicada - Proyecto Final
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/02_preprocessing.ipynb)
+
 Este notebook implementa la **Etapa 2**:
 1. Construcción de canales estandarizados `(224, 224, 3)`.
 2. Normalización de pesos ImageNet (BGR mean centering).
@@ -215,7 +219,7 @@ nb3_cells = [
         """# NeuroScan AI: Entrenamiento Acelerado en Google Colab Pro con MLflow
 ## Módulo 3: Databricks e IA Aplicada - Proyecto Final
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/03_training_colab_mlflow.ipynb)
 
 Este notebook implementa la **Etapa 3**:
 1. Detección y activación de aceleración por GPU (NVIDIA A100 / V100 / L4) y **Mixed Precision (FP16)**.
@@ -343,6 +347,8 @@ nb4_cells = [
     md_cell(
         """# NeuroScan AI: Evaluación Comparativa, Model Registry y Fase 2 Databricks
 ## Módulo 3: Databricks e IA Aplicada - Proyecto Final
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/04_evaluation_registry.ipynb)
 
 Este notebook implementa la **Etapa 5**:
 1. Consulta y tabla comparativa de los 5 experimentos registrados en MLflow.

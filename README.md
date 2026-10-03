@@ -1,6 +1,6 @@
 # NeuroScan AI: Sistema de Clasificación y Diagnóstico Asistido de Tumores Cerebrales en Resonancias Magnéticas (MRI)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EduardCY/m3-proyecto-final-databricks-ia/blob/main/notebooks/03_training_colab_mlflow.ipynb)
 [![Google Drive Hub](https://img.shields.io/badge/Google%20Drive-Artifacts%20Hub-4285F4?logo=googledrive&logoColor=white)](https://drive.google.com/)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
 [![MLflow 3.15](https://img.shields.io/badge/MLflow-3.15.1-brightgreen.svg)](https://mlflow.org/)

@@ -50,14 +50,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configuración de CORS
+# Configuración de orígenes seguros (CORS) configurable por entorno
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
+allowed_origins = [orig.strip() for orig in allowed_origins_env.split(",") if orig.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins if allowed_origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """Añade cabeceras de seguridad HTTP para mitigar ataques web comunes (OWASP).
+    
+    Why: Previene ataques de clickjacking (X-Frame-Options), ataques de sniffing de MIME
+    (X-Content-Type-Options: nosniff) y activa protecciones contra XSS en clientes web.
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 
 @app.get(

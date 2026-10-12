@@ -20,13 +20,37 @@ IS_COLAB: bool = "google.colab" in sys.modules
 # Raíz del proyecto en local o en Colab (/content/... o carpeta de workspace)
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
-# Rutas de Google Drive (habilitadas si se ejecuta en Google Colab con Drive montado)
-GDRIVE_MOUNT_POINT: Path = Path("/content/drive/MyDrive/m3_project")
+# Candidatos para montaje de Google Drive (prioriza la ruta sincronizada del curso)
+_GDRIVE_CANDIDATES = [
+    Path("/content/drive/MyDrive/01_Development/Cursos/DevSenior/m3-proyecto-final-databricks-ia"),
+    Path("/content/drive/MyDrive/m3_project"),
+]
+
+def _resolve_gdrive_mount_point() -> Path:
+    """Resuelve la ruta de Google Drive evitando fallos de ruta rígida en Google Colab.
+    
+    Why: Permite sincronización bidireccional transparente entre la carpeta sincronizada en Windows
+    (F:\\01_Development\\Cursos\\DevSenior\\m3-proyecto-final-databricks-ia) y Colab en Linux
+    (/content/drive/MyDrive/01_Development/Cursos/DevSenior/m3-proyecto-final-databricks-ia).
+    """
+    env_override = os.environ.get("NEUROSCAN_GDRIVE_DIR")
+    if env_override:
+        return Path(env_override)
+    for candidate in _GDRIVE_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return _GDRIVE_CANDIDATES[0]
+
+
+GDRIVE_MOUNT_POINT: Path = _resolve_gdrive_mount_point()
 GDRIVE_BACKUP_DIR: Path = GDRIVE_MOUNT_POINT / "backups"
 GDRIVE_CHECKPOINTS_DIR: Path = GDRIVE_MOUNT_POINT / "checkpoints"
+GDRIVE_DATA_DIR: Path = GDRIVE_MOUNT_POINT / "data"
 
-# Rutas de datos
-DEFAULT_RAW_DATA_DIR: Path = PROJECT_ROOT / "data" / "raw"
+# Rutas de datos: en Colab se prioriza disco efímero NVMe local para evitar FUSE
+DEFAULT_RAW_DATA_DIR: Path = (
+    Path("/content/data/raw") if IS_COLAB else PROJECT_ROOT / "data" / "raw"
+)
 DATA_DIR: Path = Path(os.environ.get("NEUROSCAN_DATA_DIR", str(DEFAULT_RAW_DATA_DIR)))
 
 DATA_CHECKPOINTS_DIR: Path = PROJECT_ROOT / "data" / "checkpoints"

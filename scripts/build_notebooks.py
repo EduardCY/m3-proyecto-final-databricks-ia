@@ -301,32 +301,36 @@ else:
 try:
     from google.colab import drive
     drive.mount('/content/drive')
-    DRIVE_DIR = '/content/drive/MyDrive/m3_project'
-    os.makedirs(f"{DRIVE_DIR}/checkpoints", exist_ok=True)
-    os.makedirs(f"{DRIVE_DIR}/backups", exist_ok=True)
+    from src.config import GDRIVE_MOUNT_POINT, GDRIVE_CHECKPOINTS_DIR, GDRIVE_BACKUP_DIR, GDRIVE_DATA_DIR
+    DRIVE_DIR = str(GDRIVE_MOUNT_POINT)
+    GDRIVE_CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    GDRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    GDRIVE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     print(f"✅ Google Drive conectado en: {DRIVE_DIR}")
 except Exception as e:
     print(f"Ejecutando en entorno local sin montaje de Colab Drive: {e}")"""
     ),
     code_cell(
-        """# 3. Verificación y Descarga del Dataset de Resonancias
+        """# 3. Preparación de Datos en Disco Efímero Local (Mitigación Cuello de Botella FUSE)
+# REGLA MLOps: Nunca leer 7,000 imágenes individuales directamente sobre /content/drive (FUSE).
+# Se descomprime en disco efímero NVMe local (DATA_DIR) garantizando cero latencia de red.
 from pathlib import Path
+from src.config import DATA_DIR
 from scripts.download_dataset import ensure_dataset_ready
 
-data_raw = Path("data/raw")
-ensure_dataset_ready(data_raw)
-print(f"✅ Dataset listo en: {data_raw}")"""
+ensure_dataset_ready(DATA_DIR)
+print(f"✅ Dataset disponible en disco local efímero: {DATA_DIR}")"""
     ),
     code_cell(
         """# 4. Auditoría y Construcción de Datasets tf.data
 import pandas as pd
 from src.dataset import build_manifest, split_manifest, create_stratified_split
-from src.config import BATCH_SIZE, CLASSES, SPLIT_MANIFEST_PATH
+from src.config import BATCH_SIZE, CLASSES, DATA_DIR, SPLIT_MANIFEST_PATH
 from src.preprocessing import create_tf_dataset
 from src.train import train_and_log_run
 
-# Generar manifiesto con rutas del entorno actual
-df_manifest = build_manifest(data_dir=data_raw, use_cache=False)
+# Generar manifiesto con rutas del entorno actual sobre disco efímero local
+df_manifest = build_manifest(data_dir=DATA_DIR, use_cache=False)
 df_split = split_manifest(df_manifest, output_path=SPLIT_MANIFEST_PATH)
 print(f"✅ Manifiesto y Split generados con {len(df_split)} imágenes:")
 print(df_split.groupby(["split", "label_name"]).size().unstack())
@@ -468,9 +472,9 @@ if experiment:
             "run_name": r.data.tags.get("mlflow.runName", "N/A"),
             "backbone": r.data.params.get("backbone", "N/A"),
             "test_macro_f1": r.data.metrics.get("test_macro_f1", 0.0),
-            "test_roc_auc_ovr": r.data.metrics.get("test_roc_auc_ovr", 0.0),
-            "test_recall": r.data.metrics.get("test_recall", 0.0),
-            "epochs": r.data.params.get("epochs", "N/A"),
+            "test_roc_auc_ovr": r.data.metrics.get("test_roc_auc_ovr", r.data.metrics.get("test_multiclass_auc", 0.0)),
+            "test_recall": r.data.metrics.get("test_recall", r.data.metrics.get("test_macro_recall", 0.0)),
+            "epochs": r.data.params.get("epochs_max", r.data.params.get("epochs", "N/A")),
         })
     df_runs = pd.DataFrame(records)
     if not df_runs.empty:

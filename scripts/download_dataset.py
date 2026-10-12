@@ -18,7 +18,14 @@ from urllib.request import urlretrieve
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import CLASSES, DATA_DIR, IMG_SIZE
+from src.config import (
+    CLASSES,
+    DATA_DIR,
+    GDRIVE_DATA_DIR,
+    GDRIVE_MOUNT_POINT,
+    IMG_SIZE,
+    IS_COLAB,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -108,6 +115,23 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
         logger.info(f"Dataset disponible y validado en: {target_path}")
         return True
 
+    # Comprobar si existe un archivo zip en Google Drive montado
+    candidate_drive_zips = [
+        GDRIVE_DATA_DIR / "brain_tumor_mri_clean.zip",
+        GDRIVE_MOUNT_POINT / "brain_tumor_mri_clean.zip",
+    ]
+    for drive_zip in candidate_drive_zips:
+        if drive_zip.exists():
+            logger.info(f"Detectado archivo zip en Google Drive: {drive_zip}. Copiando a almacenamiento local...")
+            local_zip = target_path.parent / "dataset_from_drive.zip"
+            shutil.copy2(drive_zip, local_zip)
+            with zipfile.ZipFile(local_zip, "r") as zf:
+                zf.extractall(target_path)
+            local_zip.unlink(missing_ok=True)
+            if verify_dataset_structure(target_path):
+                logger.info("✅ Dataset descomprimido en local desde Google Drive con éxito.")
+                return True
+
     logger.info("Iniciando descarga desatendida del dataset Brain Tumor MRI (~165 MB)...")
     zip_tmp = target_path.parent / "dataset_download_temp.zip"
     temp_extract = target_path.parent / "temp_extracted"
@@ -128,6 +152,18 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
             shutil.move(str(item), str(target_path))
 
         shutil.rmtree(temp_extract, ignore_errors=True)
+
+        # Si Google Drive está disponible, guardar una copia comprimida para futuras ejecuciones
+        if GDRIVE_MOUNT_POINT.exists():
+            try:
+                GDRIVE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+                dest_drive_zip = GDRIVE_DATA_DIR / "brain_tumor_mri_clean.zip"
+                if not dest_drive_zip.exists() and zip_tmp.exists():
+                    shutil.copy2(zip_tmp, dest_drive_zip)
+                    logger.info(f"Copia comprimida guardada en Google Drive para acelerar futuras ejecuciones: {dest_drive_zip}")
+            except Exception as e_drive:
+                logger.warning(f"No se pudo guardar copia en Google Drive: {e_drive}")
+
         zip_tmp.unlink(missing_ok=True)
         logger.info("✅ Dataset descargado y descomprimido exitosamente.")
         return True

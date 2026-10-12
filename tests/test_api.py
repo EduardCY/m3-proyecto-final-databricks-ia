@@ -74,3 +74,22 @@ def test_api_predict_explained_with_fallback(client, mock_image_bytes):
     assert len(data["clinical_rationale"]) > 10
     assert len(data["suggested_mri_protocols"]) >= 1
     assert "ai_assistant_provider" in data
+
+
+def test_api_security_headers(client):
+    """Verifica que las respuestas de la API incluyan cabeceras de seguridad HTTP OWASP."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("X-Frame-Options") == "DENY"
+    assert "1; mode=block" in response.headers.get("X-XSS-Protection", "")
+
+
+def test_api_predict_corrupted_image(client):
+    """Verifica el rechazo seguro (HTTP 422) cuando el payload es un archivo corrupto no decodificable."""
+    corrupted_bytes = b"CORRUPTED_NON_IMAGE_BINARY_DATA"
+    files = {"file": ("corrupt.jpg", corrupted_bytes, "image/jpeg")}
+    response = client.post("/predict", files=files)
+
+    assert response.status_code == 422
+    assert "no se pudo decodificar" in response.json()["detail"].lower()

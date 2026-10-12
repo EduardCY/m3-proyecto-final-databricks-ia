@@ -12,6 +12,9 @@ import tensorflow as tf
 from PIL import Image
 from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
 
+# OWASP: Limitar resolución máxima para mitigar ataques de denegación de servicio (Decompression Bomb / Pixel Flood)
+Image.MAX_IMAGE_PIXELS = 10_000_000
+
 from src.architecture import build_model, compile_model
 from src.config import (
     CLASSES,
@@ -95,7 +98,14 @@ class NeuroScanModelService:
         Returns:
             Diccionario con clase predicha, confianza y probabilidades por clase.
         """
-        # Cargar y validar imagen con Pillow
+        # OWASP: Validar estructura del archivo de imagen antes de procesar píxeles
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as probe:
+                probe.verify()
+        except Exception as e:
+            raise ValueError(f"Estructura de imagen inválida o corrupta: {e}")
+
+        # Decodificación y conversión segura a RGB
         with Image.open(io.BytesIO(image_bytes)) as pil_img:
             # Asegurar 3 canales RGB (las resonancias suelen ser escala de grises)
             pil_img = pil_img.convert("RGB")

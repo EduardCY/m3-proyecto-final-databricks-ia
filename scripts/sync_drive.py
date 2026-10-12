@@ -70,6 +70,14 @@ def backup_to_gdrive(source_dir: Path = PROJECT_ROOT, drive_root: Path = GDRIVE_
             shutil.copy2(ckpt, dest_ckpt)
             logger.info(f"[Backup] Checkpoint respaldado: {dest_ckpt.name}")
 
+    # 4. Respaldar manifiesto estratificado
+    split_manifest = source_dir / "data" / "manifest_split.csv"
+    if split_manifest.exists():
+        dest_manifest = drive_root / "data" / "manifest_split.csv"
+        dest_manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(split_manifest, dest_manifest)
+        logger.info(f"[Backup] Manifiesto estratificado respaldado en: {dest_manifest}")
+
     logger.info("Respaldo completo a Google Drive finalizado con éxito.")
 
 
@@ -92,6 +100,62 @@ def restore_from_gdrive(drive_root: Path = GDRIVE_MOUNT_POINT, dest_dir: Path = 
         dest_model_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(drive_model, dest_model_path)
         logger.info(f"[Restore] Modelo restaurado en: {dest_model_path}")
+
+    # Restaurar manifiesto
+    drive_manifest = drive_root / "data" / "manifest_split.csv"
+    if drive_manifest.exists():
+        dest_manifest_path = dest_dir / "data" / "manifest_split.csv"
+        dest_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(drive_manifest, dest_manifest_path)
+        logger.info(f"[Restore] Manifiesto restaurado en: {dest_manifest_path}")
+
+
+def sync_dataset_to_ephemeral(
+    drive_root: Path = GDRIVE_MOUNT_POINT,
+    target_data_dir: Path = Path("/content/data/raw"),
+) -> bool:
+    """Copia el dataset comprimido desde Google Drive a disco efímero NVMe y lo descomprime.
+
+    Why: El sistema de archivos FUSE de Google Colab (/content/drive) impone alta latencia
+    por llamada I/O y agota cuotas de API al leer miles de imágenes pequeñas sueltas.
+    Transferir un único archivo comprimido secuencial y descomprimirlo localmente en NVMe
+    desbloquea el ancho de banda máximo para que la GPU nunca sufra cuellos de botella.
+    """
+    import zipfile
+
+    # Buscar zip en ubicaciones estándar de Google Drive
+    candidate_zips = [
+        drive_root / "data" / "brain_tumor_mri_clean.zip",
+        drive_root / "brain_tumor_mri_clean.zip",
+        drive_root / "brain-tumor-mri-dataset.zip",
+    ]
+
+    source_zip = None
+    for cand in candidate_zips:
+        if cand.exists():
+            source_zip = cand
+            break
+
+    if not source_zip:
+        logger.warning(
+            f"No se encontró un zip del dataset en Google Drive ({drive_root}). "
+            "Se requerirá descarga remota a través de download_dataset.py."
+        )
+        return False
+
+    target_data_dir.mkdir(parents=True, exist_ok=True)
+    temp_zip_dest = target_data_dir.parent / "dataset_ephemeral.zip"
+
+    logger.info(f"Copiando secuencialmente {source_zip.name} a disco efímero ({temp_zip_dest})...")
+    shutil.copy2(source_zip, temp_zip_dest)
+
+    logger.info(f"Descomprimiendo en disco efímero local: {target_data_dir}...")
+    with zipfile.ZipFile(temp_zip_dest, "r") as zf:
+        zf.extractall(target_data_dir)
+
+    temp_zip_dest.unlink(missing_ok=True)
+    logger.info("✅ Dataset desplegado en almacenamiento efímero local con CERO latencia FUSE.")
+    return True
 
 
 def main():

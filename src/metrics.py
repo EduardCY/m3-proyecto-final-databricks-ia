@@ -133,6 +133,9 @@ def compute_comprehensive_metrics(
         "test_macro_precision": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
         "test_macro_recall": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
         "test_multiclass_auc": multiclass_auc,
+        # Alias para compatibilidad con dashboards y queries MLflow de notebooks
+        "test_recall": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+        "test_roc_auc_ovr": multiclass_auc,
     }
 
     report_str = classification_report(y_true, y_pred, target_names=classes, zero_division=0)

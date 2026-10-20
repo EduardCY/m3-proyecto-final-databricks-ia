@@ -268,9 +268,26 @@ def train_and_log_run(
         mlflow.log_artifact(str(report_path))
         mlflow.log_artifact(str(INPUT_EXAMPLE_INFO_PATH))
 
-        # Registrar el modelo serializado en MLflow
+        # Registrar el modelo serializado en MLflow con firma para evitar advertencias
+        dummy_input = np.zeros((1, 224, 224, 3), dtype=np.float32)
+        dummy_output = np.zeros((1, NUM_CLASSES), dtype=np.float32)
+        sig = mlflow.models.infer_signature(dummy_input, dummy_output)
         try:
-            mlflow.keras.log_model(model, artifact_path="model")
+            # En MLflow 3.x se usa 'name', en MLflow 2.x 'artifact_path'
+            try:
+                mlflow.keras.log_model(
+                    model,
+                    name="model",
+                    signature=sig,
+                    input_example=dummy_input,
+                )
+            except TypeError:
+                mlflow.keras.log_model(
+                    model,
+                    artifact_path="model",
+                    signature=sig,
+                    input_example=dummy_input,
+                )
         except Exception as e:
             logger.warning(f"Aviso al serializar modelo en MLflow: {e}")
 

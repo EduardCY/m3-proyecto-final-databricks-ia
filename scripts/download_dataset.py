@@ -114,7 +114,7 @@ def download_from_kaggle(dataset_name: str, target_dir: Path) -> bool:
 
 
 def verify_dataset_structure(
-    data_dir: Path, min_samples_per_class: int = 10, require_real: bool = False
+    data_dir: Path, min_samples_per_class: int = 10, require_real: bool = False, verbose: bool = True
 ) -> bool:
     """Verifica si el dataset en el directorio tiene imágenes válidas para las clases requeridas."""
     total_valid = 0
@@ -130,14 +130,17 @@ def verify_dataset_structure(
             images = all_imgs
 
         if len(images) >= min_samples_per_class:
-            logger.info(f"Clase detectada '{cls_name}': {len(images)} imágenes.")
+            if verbose:
+                logger.info(f"Clase detectada '{cls_name}': {len(images)} imágenes.")
             total_valid += len(images)
         else:
-            logger.warning(f"No se detectaron suficientes imágenes para '{cls_name}' en {data_dir} ({len(images)} halladas)")
+            if verbose:
+                logger.warning(f"No se detectaron suficientes imágenes para '{cls_name}' en {data_dir} ({len(images)} halladas)")
             return False
 
     if require_real and total_valid < 1000:
-        logger.warning(f"Total imágenes reales ({total_valid}) menor al umbral esperado (1000).")
+        if verbose:
+            logger.warning(f"Total imágenes reales ({total_valid}) menor al umbral esperado (1000).")
         return False
     return total_valid > 0
 
@@ -181,7 +184,7 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
     target_path = Path(data_dir)
     target_path.mkdir(parents=True, exist_ok=True)
 
-    if not force_download and verify_dataset_structure(target_path, require_real=True):
+    if not force_download and verify_dataset_structure(target_path, require_real=True, verbose=False):
         logger.info(f"✅ Dataset real disponible y validado en: {target_path}")
         return True
 

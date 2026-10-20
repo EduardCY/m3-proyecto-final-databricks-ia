@@ -30,27 +30,40 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-def mount_google_drive() -> bool:
+def mount_google_drive(force_remount: bool = False) -> bool:
     """Monta Google Drive si el script se ejecuta dentro de Google Colab."""
     if not IS_COLAB:
         logger.info("Entorno local detectado. No se requiere 'google.colab.drive.mount'.")
         return False
 
+    # Si ya está montado y accesible MyDrive, no volver a montar
+    if Path("/content/drive/MyDrive").exists() or Path("/content/drive/Shareddrives").exists():
+        logger.info("Google Drive ya se encuentra montado en /content/drive/MyDrive.")
+        return True
+
     try:
         from google.colab import drive
-        drive.mount("/content/drive")
+        drive.mount("/content/drive", force_remount=force_remount)
         logger.info("Google Drive montado exitosamente en /content/drive.")
         return True
     except Exception as e:
-        logger.warning(f"No se pudo montar Google Drive automáticamente: {e}")
+        logger.warning(
+            f"No se pudo montar Google Drive automáticamente: {e}. "
+            "Si ejecutas en Google Colab, pulsa el botón 'Montar Drive' en el panel lateral de archivos para autorizar el acceso."
+        )
         return False
 
 
 def backup_to_gdrive(source_dir: Path = PROJECT_ROOT, drive_root: Path | None = None) -> None:
     """Copia la base de datos de MLflow, mlruns, checkpoints y modelos hacia Google Drive."""
     effective_drive_root = drive_root if drive_root is not None else get_gdrive_mount_point()
-    if IS_COLAB and not Path("/content/drive").exists():
-        logger.warning("Google Drive no está montado en /content/drive; se omite el respaldo.")
+    is_drive_mounted = Path("/content/drive/MyDrive").exists() or Path("/content/drive/Shareddrives").exists()
+    if IS_COLAB and not is_drive_mounted:
+        logger.warning(
+            "Google Drive no está montado en /content/drive/MyDrive; se omite el respaldo en nube "
+            f"(los artefactos se preservan localmente en {source_dir}). "
+            "Para activar el respaldo en Drive, autoriza la ventana modal de Google Drive en Colab."
+        )
         return
 
     effective_drive_root.mkdir(parents=True, exist_ok=True)

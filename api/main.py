@@ -132,7 +132,7 @@ async def predict_mri(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error procesando la imagen: {e}")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             detail="No se pudo decodificar el archivo como una imagen médica válida.",
         )
 
@@ -152,7 +152,7 @@ async def predict_with_explanation(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error procesando la imagen en predict_explained: {e}")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             detail="No se pudo decodificar el archivo como una imagen médica válida.",
         )
 
@@ -179,11 +179,11 @@ async def predict_with_explanation(file: UploadFile = File(...)):
                 f"típicas de esta entidad y menciona 2 secuencias recomendadas de confirmación."
             )
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             clinical_rationale = response.text.strip()
-            provider = "Google Gemini 1.5 Flash (Google AI Pro)"
+            provider = "Google Gemini 2.5 Flash (Google AI Pro)"
         except Exception as e:
             logger.warning(f"[Failsafe AI] Falló llamada a Gemini API, usando plantilla local: {e}")
 

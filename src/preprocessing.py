@@ -11,24 +11,53 @@ import tensorflow as tf
 from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 
-from src.config import BATCH_SIZE, IMG_CHANNELS, IMG_SIZE, NUM_CLASSES, PROJECT_ROOT, SEED
+from src.config import BATCH_SIZE, DATA_DIR, IMG_CHANNELS, IMG_SIZE, NUM_CLASSES, PROJECT_ROOT, SEED
 
 
-def _resolve_image_path(raw_path: str, project_root: Path) -> str:
+def _build_file_index(search_dirs: list[Path]) -> dict[str, str]:
+    """Construye un índice en memoria O(N) de nombres de archivo a rutas absolutas.
+
+    Why: Evita ejecutar `.rglob(filename)` por cada una de las 7,023 filas del manifiesto
+    (lo que degradaría la resolución cruzada Windows/Colab a O(N^2) llamadas de I/O).
+    """
+    index: dict[str, str] = {}
+    for base_dir in search_dirs:
+        if not base_dir.exists():
+            continue
+        for root, _, files in os.walk(base_dir):
+            for fname in files:
+                if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                    full_path = str((Path(root) / fname).resolve())
+                    index.setdefault(fname, full_path)
+                    # También indexar por '<parent>/<fname>' para evitar colisiones entre splits
+                    parent_key = f"{Path(root).name.lower()}/{fname}"
+                    index[parent_key] = full_path
+    return index
+
+
+def _resolve_image_path(
+    raw_path: str,
+    project_root: Path,
+    file_index: dict[str, str] | None = None,
+) -> str:
     """Resuelve la ruta de la imagen asegurando compatibilidad multiplataforma (Windows/Linux/Colab)."""
     p = Path(raw_path)
     if p.is_file():
         return str(p.resolve())
 
-    # Fallback 1: Buscar relativo a data/raw con la subcarpeta de clase
-    candidate = project_root / "data" / "raw" / p.parent.name / p.name
-    if candidate.is_file():
-        return str(candidate.resolve())
+    # Fallback 1: Buscar relativo a DATA_DIR (disco efímero NVMe en Colab) o project_root/data/raw
+    for base_raw in (DATA_DIR, project_root / "data" / "raw"):
+        candidate = base_raw / p.parent.name / p.name
+        if candidate.is_file():
+            return str(candidate.resolve())
 
-    # Fallback 2: Buscar en data/raw recursivamente por nombre de archivo
-    matches = list((project_root / "data" / "raw").rglob(p.name))
-    if matches:
-        return str(matches[0].resolve())
+    # Fallback 2: Búsqueda O(1) mediante el índice preconstruido
+    if file_index:
+        parent_key = f"{p.parent.name.lower()}/{p.name}"
+        if parent_key in file_index:
+            return file_index[parent_key]
+        if p.name in file_index:
+            return file_index[p.name]
 
     return str(p)
 
@@ -104,7 +133,12 @@ def create_tf_dataset(
     if split_df.empty:
         raise ValueError(f"No hay registros en el DataFrame para el split '{split_name}'.")
 
-    paths = [_resolve_image_path(str(p), PROJECT_ROOT) for p in split_df["path"].values]
+    raw_paths = [str(p) for p in split_df["path"].values]
+    # Construcción perezosa O(N) del índice de archivos solo si alguna ruta requiere reubicación
+    needs_index = any(not Path(p).is_file() for p in raw_paths[:5])
+    file_index = _build_file_index([DATA_DIR, PROJECT_ROOT / "data" / "raw"]) if needs_index else None
+
+    paths = [_resolve_image_path(p, PROJECT_ROOT, file_index=file_index) for p in raw_paths]
     labels = split_df["label"].values
 
     dataset = tf.data.Dataset.from_tensor_slices((paths, labels))

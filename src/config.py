@@ -20,18 +20,18 @@ IS_COLAB: bool = "google.colab" in sys.modules
 # Raíz del proyecto en local o en Colab (/content/... o carpeta de workspace)
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
-# Candidatos para montaje de Google Drive (prioriza la ruta sincronizada del curso)
+# Candidatos para montaje de Google Drive (prioriza m3_project en Colab y carpeta sincronizada)
 _GDRIVE_CANDIDATES = [
-    Path("/content/drive/MyDrive/01_Development/Cursos/DevSenior/m3-proyecto-final-databricks-ia"),
     Path("/content/drive/MyDrive/m3_project"),
+    Path("/content/drive/MyDrive/01_Development/Cursos/DevSenior/m3-proyecto-final-databricks-ia"),
 ]
 
-def _resolve_gdrive_mount_point() -> Path:
-    """Resuelve la ruta de Google Drive evitando fallos de ruta rígida en Google Colab.
-    
-    Why: Permite sincronización bidireccional transparente entre la carpeta sincronizada en Windows
-    (F:\\01_Development\\Cursos\\DevSenior\\m3-proyecto-final-databricks-ia) y Colab en Linux
-    (/content/drive/MyDrive/01_Development/Cursos/DevSenior/m3-proyecto-final-databricks-ia).
+
+def get_gdrive_mount_point() -> Path:
+    """Resuelve dinámicamente la ruta de Google Drive en cualquier instante de ejecución.
+
+    Why: En Google Colab, `src.config` puede importarse antes de ejecutar `drive.mount('/content/drive')`.
+    Evaluar dinámicamente los candidatos evita quedarse atado a una ruta inexistente evaluada en import-time.
     """
     env_override = os.environ.get("NEUROSCAN_GDRIVE_DIR")
     if env_override:
@@ -42,7 +42,7 @@ def _resolve_gdrive_mount_point() -> Path:
     return _GDRIVE_CANDIDATES[0]
 
 
-GDRIVE_MOUNT_POINT: Path = _resolve_gdrive_mount_point()
+GDRIVE_MOUNT_POINT: Path = get_gdrive_mount_point()
 GDRIVE_BACKUP_DIR: Path = GDRIVE_MOUNT_POINT / "backups"
 GDRIVE_CHECKPOINTS_DIR: Path = GDRIVE_MOUNT_POINT / "checkpoints"
 GDRIVE_DATA_DIR: Path = GDRIVE_MOUNT_POINT / "data"
@@ -70,12 +70,39 @@ for directory in [DATA_CHECKPOINTS_DIR, MODEL_CHECKPOINTS_DIR, MODELS_DIR]:
 # --------------------------------------------------------------------------
 # Configuración de MLflow Tracking y Registry
 # --------------------------------------------------------------------------
-if IS_COLAB and GDRIVE_MOUNT_POINT.exists():
-    DEFAULT_MLFLOW_DB = f"sqlite:///{GDRIVE_MOUNT_POINT / 'mlflow.db'}"
-else:
-    DEFAULT_MLFLOW_DB = f"sqlite:///{PROJECT_ROOT / 'mlflow.db'}"
+# Why: Se utiliza el disco local (NVMe en Colab) como backend activo de SQLite para evitar
+# bloqueos de concurrencia ('database is locked') sobre el sistema FUSE de Google Drive.
+# La sincronización hacia/desde Google Drive se realiza atómicamente vía scripts/sync_drive.py.
+LOCAL_MLFLOW_DB_PATH: Path = PROJECT_ROOT / "mlflow.db"
+DEFAULT_MLFLOW_DB: str = f"sqlite:///{LOCAL_MLFLOW_DB_PATH.as_posix()}"
 
-MLFLOW_TRACKING_URI: str = os.environ.get("NEUROSCAN_MLFLOW_URI", DEFAULT_MLFLOW_DB)
+
+def resolve_active_mlflow_uri() -> str:
+    """Resuelve el URI de MLflow garantizando la restauración desde Google Drive si la DB local está vacía.
+
+    Why: Cuando se abre el Notebook 04 en una nueva sesión de Colab, `PROJECT_ROOT / 'mlflow.db'`
+    no existe aún o fue inicializada vacía. Esta función verifica si existe una copia poblada
+    en Google Drive y la restaura antes de conectar el cliente MLflow.
+    """
+    env_uri = os.environ.get("NEUROSCAN_MLFLOW_URI")
+    if env_uri:
+        return env_uri
+
+    gdrive_db = get_gdrive_mount_point() / "mlflow.db"
+    if gdrive_db.exists() and gdrive_db.stat().st_size > 0:
+        local_size = LOCAL_MLFLOW_DB_PATH.stat().st_size if LOCAL_MLFLOW_DB_PATH.exists() else 0
+        if local_size < gdrive_db.stat().st_size:
+            import shutil
+
+            try:
+                shutil.copy2(gdrive_db, LOCAL_MLFLOW_DB_PATH)
+            except Exception:
+                return f"sqlite:///{gdrive_db.as_posix()}"
+
+    return f"sqlite:///{LOCAL_MLFLOW_DB_PATH.as_posix()}"
+
+
+MLFLOW_TRACKING_URI: str = resolve_active_mlflow_uri()
 MLFLOW_EXPERIMENT_NAME: str = "NeuroScan-MRI-BrainTumor"
 MLFLOW_MODEL_NAME: str = "neuro_mri_classifier"
 

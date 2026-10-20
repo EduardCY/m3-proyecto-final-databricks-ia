@@ -10,7 +10,12 @@ import pytest
 import tensorflow as tf
 
 from src.config import CLASSES, IMG_CHANNELS, IMG_SIZE, NUM_CLASSES
-from src.preprocessing import create_tf_dataset, load_and_preprocess_image
+from src.preprocessing import (
+    _build_file_index,
+    _resolve_image_path,
+    create_tf_dataset,
+    load_and_preprocess_image,
+)
 
 
 @pytest.fixture
@@ -58,3 +63,20 @@ def test_create_tf_dataset_batch_integrity(sample_image_and_df):
         assert labels.shape == (2, NUM_CLASSES)
         assert not np.isnan(images.numpy()).any(), "Se detectaron valores NaN en los tensores de imagen"
         assert not np.isinf(images.numpy()).any(), "Se detectaron valores Inf en los tensores de imagen"
+
+
+def test_cross_platform_path_resolution_with_index(tmp_path: Path):
+    """Verifica que el índice O(N) resuelva rutas movidas entre máquinas (Windows/Colab NVMe)."""
+    nvme_dir = tmp_path / "content" / "data" / "raw" / "Training" / "glioma"
+    nvme_dir.mkdir(parents=True, exist_ok=True)
+    real_img = nvme_dir / "Tr-gl_0010.jpg"
+    arr = np.random.randint(0, 255, size=(64, 64, 3), dtype=np.uint8)
+    Image.fromarray(arr).save(real_img)
+
+    file_index = _build_file_index([tmp_path / "content" / "data" / "raw"])
+    stale_path = "C:/old_machine/data/raw/glioma/Tr-gl_0010.jpg"
+    resolved = _resolve_image_path(stale_path, tmp_path, file_index=file_index)
+
+    assert Path(resolved).is_file()
+    assert Path(resolved).resolve() == real_img.resolve()
+

@@ -39,6 +39,8 @@ from src.config import (
     NUM_CLASSES,
     REDUCE_LR_PATIENCE,
     SEED,
+    get_gdrive_mount_point,
+    resolve_active_mlflow_uri,
 )
 from src.metrics import (
     compute_comprehensive_metrics,
@@ -53,19 +55,24 @@ logger = logging.getLogger(__name__)
 class DriveSyncCallback(tf.keras.callbacks.Callback):
     """Callback de resiliencia: replica checkpoints en Google Drive tras cada época."""
 
-    def __init__(self, local_checkpoint_path: Path, drive_checkpoint_dir: Path):
+    def __init__(self, local_checkpoint_path: Path, drive_checkpoint_dir: Optional[Path] = None):
         super().__init__()
         self.local_path = local_checkpoint_path
         self.drive_dir = drive_checkpoint_dir
 
     def on_epoch_end(self, epoch: int, logs: dict = None):
-        if not ENABLE_DRIVE_SYNC or not self.drive_dir.exists():
+        if not ENABLE_DRIVE_SYNC:
+            return
+        target_drive_dir = self.drive_dir if self.drive_dir is not None else (get_gdrive_mount_point() / "checkpoints")
+        if not target_drive_dir.parent.exists():
             return
         try:
+            target_drive_dir.mkdir(parents=True, exist_ok=True)
             if self.local_path.exists():
-                drive_dest = self.drive_dir / self.local_path.name
-                shutil.copy2(self.local_path, drive_dest)
-                logger.info(f"[Drive Sync] Checkpoint respaldado en Drive: {drive_dest.name}")
+                drive_dest = target_drive_dir / self.local_path.name
+                if self.local_path.resolve() != drive_dest.resolve():
+                    shutil.copy2(self.local_path, drive_dest)
+                    logger.info(f"[Drive Sync] Checkpoint respaldado en Drive: {drive_dest.name}")
         except Exception as e:
             logger.warning(f"No se pudo sincronizar checkpoint con Drive: {e}")
 
@@ -92,12 +99,14 @@ def train_and_log_run(
     1. Checkpoints locales y sincronizados a Google Drive.
     2. Respaldo de métricas en CSVLogger independiente de SQLite.
     3. Reanudación desde checkpoints previos si hubo desconexión.
+    4. Sincronización automática de mlflow.db, mlruns y modelo campeón tras cada corrida.
     """
     set_seeds(SEED)
     mixed_precision_active = enable_mixed_precision_if_available()
 
-    # Configuración de MLflow
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    # Configuración dinámica de MLflow
+    active_uri = resolve_active_mlflow_uri()
+    mlflow.set_tracking_uri(active_uri)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
     # 1. Construcción o reanudación del modelo
@@ -110,11 +119,19 @@ def train_and_log_run(
         weights=weights,
     )
 
+    try:
+        card = int(tf.data.experimental.cardinality(train_dataset).numpy())
+        steps_per_epoch = card if card > 0 else 150
+    except Exception:
+        steps_per_epoch = 150
+    total_decay_steps = max(100, steps_per_epoch * epochs)
+
     compile_model(
         model=model,
         learning_rate=learning_rate,
         optimizer_name=optimizer_name,
         use_cosine_decay=use_cosine_decay,
+        decay_steps=total_decay_steps,
     )
 
     if resume_from_checkpoint and resume_from_checkpoint.exists():
@@ -141,20 +158,26 @@ def train_and_log_run(
             restore_best_weights=True,
             verbose=1,
         ),
-        ReduceLROnPlateau(
-            monitor="val_loss",
-            mode="min",
-            factor=0.5,
-            patience=REDUCE_LR_PATIENCE,
-            min_lr=MIN_LEARNING_RATE,
-            verbose=1,
-        ),
         CSVLogger(filename=str(csv_backup_path)),
     ]
 
+    # Why: En Keras 3, ReduceLROnPlateau muta `optimizer.learning_rate`, lo cual lanza TypeError
+    # cuando el optimizador usa un LearningRateSchedule como CosineDecay.
+    if not use_cosine_decay:
+        callbacks.append(
+            ReduceLROnPlateau(
+                monitor="val_loss",
+                mode="min",
+                factor=0.5,
+                patience=REDUCE_LR_PATIENCE,
+                min_lr=MIN_LEARNING_RATE,
+                verbose=1,
+            )
+        )
+
     # Añadir sincronización a Google Drive si está activo
-    if ENABLE_DRIVE_SYNC and GDRIVE_CHECKPOINTS_DIR.exists():
-        callbacks.append(DriveSyncCallback(best_checkpoint_path, GDRIVE_CHECKPOINTS_DIR))
+    if ENABLE_DRIVE_SYNC:
+        callbacks.append(DriveSyncCallback(best_checkpoint_path))
 
     with mlflow.start_run(run_name=run_name) as run:
         # A. Registrar parámetros del experimento
@@ -251,6 +274,47 @@ def train_and_log_run(
         except Exception as e:
             logger.warning(f"Aviso al serializar modelo en MLflow: {e}")
 
-        logger.info(f"Run '{run_name}' finalizado exitosamente. Macro-F1={metrics_dict['test_macro_f1']:.4f}")
+        # F. Promoción automática al archivo de producción si supera el mejor Macro-F1 previo
+        champion_meta_path = MODEL_CHECKPOINTS_DIR / "champion_metadata.json"
+        prev_best_f1 = -1.0
+        if champion_meta_path.exists():
+            try:
+                with open(champion_meta_path, "r", encoding="utf-8") as f:
+                    prev_best_f1 = float(json.load(f).get("test_macro_f1", -1.0))
+            except Exception:
+                prev_best_f1 = -1.0
+
+        current_f1 = float(metrics_dict.get("test_macro_f1", 0.0))
+        if current_f1 >= prev_best_f1 or not FINAL_MODEL_PATH.exists():
+            FINAL_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if best_checkpoint_path.exists():
+                shutil.copy2(best_checkpoint_path, FINAL_MODEL_PATH)
+            else:
+                model.save(str(FINAL_MODEL_PATH))
+            champion_payload = {
+                "run_id": run.info.run_id,
+                "run_name": run_name,
+                "backbone": backbone_name,
+                "test_macro_f1": current_f1,
+                "test_roc_auc_ovr": float(metrics_dict.get("test_roc_auc_ovr", 0.0)),
+                "model_path": str(FINAL_MODEL_PATH),
+            }
+            with open(champion_meta_path, "w", encoding="utf-8") as f:
+                json.dump(champion_payload, f, indent=2)
+            logger.info(
+                f"🏆 Nuevo modelo campeón actualizado en {FINAL_MODEL_PATH.name} "
+                f"(Macro-F1={current_f1:.4f})"
+            )
+
+        logger.info(f"Run '{run_name}' finalizado exitosamente. Macro-F1={current_f1:.4f}")
+
+    # G. Sincronización atómica inmediata con Google Drive tras cerrar la transacción de MLflow
+    if ENABLE_DRIVE_SYNC:
+        try:
+            from scripts.sync_drive import backup_to_gdrive
+
+            backup_to_gdrive()
+        except Exception as e_sync:
+            logger.warning(f"Aviso al respaldar corrida en Google Drive: {e_sync}")
 
     return model, history, metrics_dict

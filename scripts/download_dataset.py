@@ -30,10 +30,46 @@ from src.config import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Enlace de respaldo público del dataset compilado
-BACKUP_DATASET_URL = (
-    "https://github.com/masoudnickparvar/brain-tumor-mri-dataset/archive/refs/heads/main.zip"
+# Enlaces de descarga directa del dataset oficial (164.67 MB)
+KAGGLE_DATASET_ID = "masoudnickparvar/brain-tumor-mri-dataset"
+KAGGLE_DIRECT_URL = (
+    "https://www.kaggle.com/api/v1/datasets/download/masoudnickparvar/brain-tumor-mri-dataset"
 )
+BACKUP_DATASET_URL = KAGGLE_DIRECT_URL
+
+
+def download_stream(url: str, output_path: Path, timeout: int = 60) -> bool:
+    """Descarga un archivo grande vía streaming HTTP con User-Agent estándar para evitar bloqueos 403/404."""
+    import urllib.request
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+    )
+    logger.info(f"Conectando a {url}...")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            total_size = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+            block_size = 1024 * 1024  # 1 MB por bloque
+            with open(output_path, "wb") as out_file:
+                while True:
+                    chunk = response.read(block_size)
+                    if not chunk:
+                        break
+                    out_file.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0 and downloaded % (10 * 1024 * 1024) < block_size:
+                        pct = (downloaded / total_size) * 100
+                        logger.info(f"Progreso descarga: {downloaded / (1024*1024):.1f}/{total_size / (1024*1024):.1f} MB ({pct:.1f}%)")
+        logger.info(f"✅ Descarga completada exitosamente: {output_path.name} ({downloaded / (1024*1024):.1f} MB)")
+        return True
+    except Exception as e:
+        logger.warning(f"Error descargando desde {url}: {e}")
+        if output_path.exists():
+            output_path.unlink(missing_ok=True)
+        return False
 
 
 def generate_smoke_test_dataset(output_dir: Path, samples_per_class: int = 15) -> None:
@@ -77,47 +113,82 @@ def download_from_kaggle(dataset_name: str, target_dir: Path) -> bool:
         return False
 
 
-def verify_dataset_structure(data_dir: Path) -> bool:
+def verify_dataset_structure(
+    data_dir: Path, min_samples_per_class: int = 10, require_real: bool = False
+) -> bool:
     """Verifica si el dataset en el directorio tiene imágenes válidas para las clases requeridas."""
-    found_any = False
+    total_valid = 0
     for cls_name in CLASSES:
-        images = (
+        all_imgs = (
             list(data_dir.rglob(f"*{cls_name}*/*.jpg"))
             + list(data_dir.rglob(f"*{cls_name}*/*.jpeg"))
             + list(data_dir.rglob(f"*{cls_name}*/*.png"))
         )
-        if images:
-            logger.info(f"Clase detectada '{cls_name}': {len(images)} imágenes.")
-            found_any = True
+        if require_real:
+            images = [p for p in all_imgs if not p.name.startswith("mock_")]
         else:
-            logger.warning(f"No se detectaron imágenes para la clase '{cls_name}' en {data_dir}")
-    return found_any
+            images = all_imgs
+
+        if len(images) >= min_samples_per_class:
+            logger.info(f"Clase detectada '{cls_name}': {len(images)} imágenes.")
+            total_valid += len(images)
+        else:
+            logger.warning(f"No se detectaron suficientes imágenes para '{cls_name}' en {data_dir} ({len(images)} halladas)")
+            return False
+
+    if require_real and total_valid < 1000:
+        logger.warning(f"Total imágenes reales ({total_valid}) menor al umbral esperado (1000).")
+        return False
+    return total_valid > 0
+
+
+def download_via_kagglehub(target_dir: Path) -> bool:
+    """Descarga el dataset público oficial usando kagglehub (disponible en Colab sin credenciales)."""
+    try:
+        import kagglehub
+
+        logger.info(f"Descargando {KAGGLE_DATASET_ID} vía kagglehub (alta velocidad sin credenciales)...")
+        cache_path = kagglehub.dataset_download(KAGGLE_DATASET_ID)
+        logger.info(f"Dataset descargado en caché de kagglehub: {cache_path}")
+        src_path = Path(cache_path)
+        for item in src_path.iterdir():
+            dest = target_dir / item.name
+            if dest.exists():
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                else:
+                    dest.unlink()
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+        return verify_dataset_structure(target_dir, require_real=True)
+    except Exception as e:
+        logger.warning(f"kagglehub no disponible o falló: {e}")
+        return False
 
 
 def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False) -> bool:
     """Garantiza la disponibilidad inmediata del dataset en el directorio destino.
 
-    Si las imágenes no existen, las descarga directamente desde el repositorio público
-    del dataset oficial (~165 MB). Si no hay conexión o falla la descarga, genera
-    un conjunto de prueba (smoke test) sintético para asegurar que el pipeline nunca se detenga.
-
-    Args:
-        data_dir: Directorio raíz donde reside el dataset.
-        force_download: Si es True, fuerza la descarga incluso si ya existen imágenes.
-
-    Returns:
-        True si el dataset quedó listo para entrenamiento o pruebas.
+    Estrategia de resolución en capas:
+    1. Reutilización si ya existen imágenes reales (>= 1,000 cortes).
+    2. Copia local desde Google Drive si existe el zip respaldado.
+    3. Descarga ultrarrápida vía `kagglehub` (estándar en Google Colab sin credenciales).
+    4. Descarga directa en streaming HTTP desde el endpoint público de Kaggle (~164.67 MB).
+    5. Fallback a datos mock solo en caso de desconexión absoluta.
     """
     target_path = Path(data_dir)
     target_path.mkdir(parents=True, exist_ok=True)
 
-    if not force_download and verify_dataset_structure(target_path):
-        logger.info(f"Dataset disponible y validado en: {target_path}")
+    if not force_download and verify_dataset_structure(target_path, require_real=True):
+        logger.info(f"✅ Dataset real disponible y validado en: {target_path}")
         return True
 
-    # Comprobar si existe un archivo zip en Google Drive montado
+    # 1. Comprobar si existe un archivo zip en Google Drive montado
     candidate_drive_zips = [
         GDRIVE_DATA_DIR / "brain_tumor_mri_clean.zip",
+        GDRIVE_MOUNT_POINT / "data" / "brain_tumor_mri_clean.zip",
         GDRIVE_MOUNT_POINT / "brain_tumor_mri_clean.zip",
     ]
     for drive_zip in candidate_drive_zips:
@@ -128,51 +199,69 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
             with zipfile.ZipFile(local_zip, "r") as zf:
                 zf.extractall(target_path)
             local_zip.unlink(missing_ok=True)
-            if verify_dataset_structure(target_path):
+            if verify_dataset_structure(target_path, require_real=True):
                 logger.info("✅ Dataset descomprimido en local desde Google Drive con éxito.")
                 return True
 
-    logger.info("Iniciando descarga desatendida del dataset Brain Tumor MRI (~165 MB)...")
+    # 2. Intentar descarga vía kagglehub (óptimo en Google Colab)
+    if download_via_kagglehub(target_path):
+        logger.info("✅ Dataset descargado y descomprimido exitosamente vía kagglehub.")
+        return True
+
+    # 3. Descarga directa streaming del ZIP oficial de Kaggle (~164.67 MB)
+    logger.info("Iniciando descarga streaming directa del dataset Brain Tumor MRI (~164.67 MB)...")
     zip_tmp = target_path.parent / "dataset_download_temp.zip"
     temp_extract = target_path.parent / "temp_extracted"
 
-    try:
-        urlretrieve(BACKUP_DATASET_URL, zip_tmp)
-        with zipfile.ZipFile(zip_tmp, "r") as zip_ref:
-            zip_ref.extractall(temp_extract)
+    download_ok = download_stream(KAGGLE_DIRECT_URL, zip_tmp)
+    if download_ok and zip_tmp.exists():
+        try:
+            with zipfile.ZipFile(zip_tmp, "r") as zip_ref:
+                zip_ref.extractall(temp_extract)
 
-        extracted_root = next(temp_extract.glob("brain-tumor-mri-dataset-*"))
-        for item in extracted_root.iterdir():
-            dest = target_path / item.name
-            if dest.exists():
-                if dest.is_dir():
-                    shutil.rmtree(dest)
-                else:
-                    dest.unlink()
-            shutil.move(str(item), str(target_path))
+            # Localizar subcarpeta extraída o raíz
+            extracted_subfolders = list(temp_extract.glob("brain-tumor-mri-dataset*"))
+            source_root = extracted_subfolders[0] if extracted_subfolders else temp_extract
 
-        shutil.rmtree(temp_extract, ignore_errors=True)
+            # Limpiar datos mock previos en destino si existían
+            for mock_file in target_path.rglob("mock_*.jpg"):
+                mock_file.unlink(missing_ok=True)
 
-        # Si Google Drive está disponible, guardar una copia comprimida para futuras ejecuciones
-        if GDRIVE_MOUNT_POINT.exists():
-            try:
-                GDRIVE_DATA_DIR.mkdir(parents=True, exist_ok=True)
-                dest_drive_zip = GDRIVE_DATA_DIR / "brain_tumor_mri_clean.zip"
-                if not dest_drive_zip.exists() and zip_tmp.exists():
-                    shutil.copy2(zip_tmp, dest_drive_zip)
-                    logger.info(f"Copia comprimida guardada en Google Drive para acelerar futuras ejecuciones: {dest_drive_zip}")
-            except Exception as e_drive:
-                logger.warning(f"No se pudo guardar copia en Google Drive: {e_drive}")
+            for item in source_root.iterdir():
+                dest = target_path / item.name
+                if dest.exists():
+                    if dest.is_dir():
+                        shutil.rmtree(dest)
+                    else:
+                        dest.unlink()
+                shutil.move(str(item), str(target_path))
 
-        zip_tmp.unlink(missing_ok=True)
-        logger.info("✅ Dataset descargado y descomprimido exitosamente.")
-        return True
-    except Exception as e:
-        logger.warning(f"⚠️ Fallo en descarga remota ({e}). Generando dataset de contingencia sintético...")
-        shutil.rmtree(temp_extract, ignore_errors=True)
-        zip_tmp.unlink(missing_ok=True)
-        generate_smoke_test_dataset(target_path, samples_per_class=30)
-        return False
+            shutil.rmtree(temp_extract, ignore_errors=True)
+
+            # Guardar una copia comprimida en Google Drive para acelerar ejecuciones futuras
+            if GDRIVE_MOUNT_POINT.exists() or Path("/content/drive/MyDrive").exists():
+                try:
+                    GDRIVE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+                    dest_drive_zip = GDRIVE_DATA_DIR / "brain_tumor_mri_clean.zip"
+                    if not dest_drive_zip.exists() and zip_tmp.exists():
+                        shutil.copy2(zip_tmp, dest_drive_zip)
+                        logger.info(f"Copia comprimida guardada en Google Drive: {dest_drive_zip}")
+                except Exception as e_drive:
+                    logger.warning(f"No se pudo guardar copia en Google Drive: {e_drive}")
+
+            zip_tmp.unlink(missing_ok=True)
+            if verify_dataset_structure(target_path, require_real=True):
+                logger.info("✅ Dataset descargado y descomprimido exitosamente en almacenamiento local.")
+                return True
+        except Exception as e_extract:
+            logger.warning(f"Error al extraer archivo zip: {e_extract}")
+            shutil.rmtree(temp_extract, ignore_errors=True)
+            zip_tmp.unlink(missing_ok=True)
+
+    # 4. Fallback final de contingencia
+    logger.warning("⚠️ No se pudo obtener el dataset real. Generando dataset de contingencia sintético...")
+    generate_smoke_test_dataset(target_path, samples_per_class=30)
+    return False
 
 
 def main():

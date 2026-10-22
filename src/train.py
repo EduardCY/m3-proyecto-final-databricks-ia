@@ -319,7 +319,7 @@ def train_and_log_run(
             with open(champion_meta_path, "w", encoding="utf-8") as f:
                 json.dump(champion_payload, f, indent=2)
             logger.info(
-                f"🏆 Nuevo modelo campeón actualizado en {FINAL_MODEL_PATH.name} "
+                f"[CAMPEON] Nuevo modelo de referencia actualizado en {FINAL_MODEL_PATH.name} "
                 f"(Macro-F1={current_f1:.4f})"
             )
 

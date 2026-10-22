@@ -57,14 +57,14 @@ def download_file_from_drive(file_id_or_url: str, output_path: Path) -> bool:
         # Intentar con gdown si está disponible
         import gdown
         gdown.download(download_url, str(output_path), quiet=False)
-        logger.info(f"✅ Descarga exitosa con gdown: {output_path.name}")
+        logger.info(f"[OK] Descarga exitosa con gdown: {output_path.name}")
         return True
     except ImportError:
         pass
 
     try:
         urlretrieve(download_url, str(output_path))
-        logger.info(f"✅ Descarga completada: {output_path.name}")
+        logger.info(f"[OK] Descarga completada: {output_path.name}")
         return True
     except Exception as e:
         logger.error(f"Error al descargar desde Google Drive: {e}")

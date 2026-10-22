@@ -59,10 +59,10 @@ import sys
 if 'google.colab' in sys.modules:
     # 1. Clonar o actualizar el repositorio público en /content
     if not os.path.exists('/content/m3-proyecto-final-databricks-ia'):
-        print("🚀 Clonando repositorio NeuroScan AI en Google Colab...")
+        print("[INFO] Clonando repositorio NeuroScan AI en Google Colab...")
         !git clone https://github.com/EduardCY/m3-proyecto-final-databricks-ia.git /content/m3-proyecto-final-databricks-ia
     else:
-        print("🔄 Actualizando repositorio con los últimos cambios de GitHub...")
+        print("[INFO] Actualizando repositorio con los últimos cambios de GitHub...")
         !git -C /content/m3-proyecto-final-databricks-ia pull origin main
     
     # 2. Posicionarse en la carpeta raíz del proyecto
@@ -81,7 +81,7 @@ PROJECT_ROOT = os.getcwd()
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-print(f"✅ Entorno preparado en: {PROJECT_ROOT}")"""
+print(f"[OK] Entorno preparado en: {PROJECT_ROOT}")"""
 
 
 # ==============================================================================
@@ -173,7 +173,7 @@ assert len(train_paths.intersection(val_paths)) == 0, "¡FUGA DETECTADA entre Tr
 assert len(train_paths.intersection(test_paths)) == 0, "¡FUGA DETECTADA entre Train y Test!"
 assert len(val_paths.intersection(test_paths)) == 0, "¡FUGA DETECTADA entre Val y Test!"
 
-print("\\n✅ COMPROBACIÓN EXITOSA: Partición sin fuga de datos confirmada y guardada en data/manifest_split.csv")"""
+print("\\n[COMPROBACION EXITOSA] Partición sin fuga de datos confirmada y guardada en data/manifest_split.csv")"""
     ),
 ]
 
@@ -289,11 +289,11 @@ import tensorflow as tf
 print(f"TensorFlow: {tf.__version__}")
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
-    print(f"✅ GPU Aceleradora Detectada: {gpus}")
+    print(f"[OK] Acelerador GPU detectado: {gpus}")
     tf.keras.mixed_precision.set_global_policy("mixed_float16")
-    print("🚀 Mixed Precision FP16 habilitada para Tensor Cores.")
+    print("[INFO] Precision mixta FP16 habilitada para Tensor Cores.")
 else:
-    print("⚠️ No se detectó GPU. Ejecutando en CPU.")"""
+    print("[ADVERTENCIA] No se detecto GPU. Ejecutando en CPU.")"""
     ),
     code_cell(
         """# 2. Montar Google Drive para Respaldo Resiliente
@@ -307,7 +307,7 @@ try:
     (drive_root / "backups").mkdir(parents=True, exist_ok=True)
     (drive_root / "data").mkdir(parents=True, exist_ok=True)
     restore_from_gdrive(drive_root=drive_root)
-    print(f"✅ Google Drive conectado y sincronizado en: {drive_root}")
+    print(f"[OK] Google Drive conectado y sincronizado en: {drive_root}")
 except Exception as e:
     print(f"Ejecutando en entorno local sin montaje de Colab Drive: {e}")"""
     ),
@@ -320,7 +320,7 @@ from src.config import DATA_DIR
 from scripts.download_dataset import ensure_dataset_ready
 
 ensure_dataset_ready(DATA_DIR)
-print(f"✅ Dataset disponible en disco local efímero: {DATA_DIR}")"""
+print(f"[OK] Dataset disponible en disco local efimero: {DATA_DIR}")"""
     ),
     code_cell(
         """# 4. Auditoría y Construcción de Datasets tf.data
@@ -333,13 +333,13 @@ from src.train import train_and_log_run
 # Generar manifiesto con rutas del entorno actual sobre disco efímero local
 df_manifest = build_manifest(data_dir=DATA_DIR, use_cache=False)
 df_split = split_manifest(df_manifest, output_path=SPLIT_MANIFEST_PATH)
-print(f"✅ Manifiesto y Split generados con {len(df_split)} imágenes:")
+print(f"[OK] Manifiesto y split generados con {len(df_split)} imágenes:")
 print(df_split.groupby(["split", "label_name"]).size().unstack())
 
 train_ds = create_tf_dataset(df_split, split_name="train", batch_size=BATCH_SIZE, model_type="resnet50")
 val_ds = create_tf_dataset(df_split, split_name="val", batch_size=BATCH_SIZE, model_type="resnet50")
 test_ds = create_tf_dataset(df_split, split_name="test", batch_size=BATCH_SIZE, model_type="resnet50")
-print("✅ Pipelines tf.data listos para GPU.")"""
+print("[OK] Pipelines tf.data listos para GPU.")"""
     ),
     md_cell("### 4. Ejecución de los 5 Experimentos en MLflow"),
     code_cell(
@@ -406,7 +406,7 @@ from mlflow.tracking import MlflowClient
 import pandas as pd
 
 backup_to_gdrive()
-print("✅ Todos los checkpoints, modelos, mlruns y la base de datos de MLflow fueron respaldados en Google Drive.")
+print("[OK] Todos los checkpoints, modelos, mlruns y la base de datos de MLflow fueron respaldados en Google Drive.")
 
 mlflow.set_tracking_uri(resolve_active_mlflow_uri())
 client = MlflowClient()
@@ -423,7 +423,7 @@ if exp:
         }
         for r in runs
     ]
-    print("\\n📊 Resumen de Experimentos Registrados:")
+    print("\\n[REPORTE] Resumen de experimentos registrados:")
     print(pd.DataFrame(summary_rows).to_markdown(index=False))"""
     ),
 ]
@@ -461,7 +461,7 @@ try:
     from google.colab import drive
     drive.mount('/content/drive')
     from scripts.sync_drive import restore_from_gdrive
-    print("📥 Sincronizando mlflow.db, mlruns y artefactos desde Google Drive...")
+    print("[SINCRONIZACION] Sincronizando mlflow.db, mlruns y artefactos desde Google Drive...")
     restore_from_gdrive()
 except Exception as e:
     print(f"Modo local o aviso de Google Drive: {e}")
@@ -507,13 +507,13 @@ if runs:
             "epochs": r.data.params.get("epochs_max", r.data.params.get("epochs", "N/A")),
         })
     df_runs = pd.DataFrame(records)
-    print("📊 Resultados recuperados desde MLflow Tracking DB:")
+    print("[REPORTE] Resultados recuperados desde base de datos de MLflow:")
     try:
         print(df_runs.to_markdown(index=False))
     except Exception:
         print(df_runs.to_string(index=False))
 else:
-    print(f"⚠️ No se hallaron corridas activas en '{MLFLOW_EXPERIMENT_NAME}' ({active_tracking_uri}).")
+    print(f"[ADVERTENCIA] No se hallaron corridas activas en '{MLFLOW_EXPERIMENT_NAME}' ({active_tracking_uri}).")
     print("Mostrando tabla de referencia validada (ejecuta previamente el Notebook 03 para poblar mlflow.db en vivo):")
     fallback_records = [
         {"run_name": "Run_4_ResNet50_DeepFineTune_120_Cosine", "backbone": "resnet50", "test_macro_f1": 0.9675, "test_roc_auc_ovr": 0.9968, "test_recall": 0.9668, "epochs": 15},
@@ -532,13 +532,13 @@ best_run = runs[0] if runs else None
 if best_run:
     best_run_id = best_run.info.run_id
     best_run_name = best_run.data.tags.get("mlflow.runName", "Champion_Run")
-    print(f"🏆 Modelo Campeón identificado: {best_run_name} (Run ID: {best_run_id})")
+    print(f"[CAMPEON] Modelo de mayor rendimiento identificado: {best_run_name} (Run ID: {best_run_id})")
     print(f"Métricas Campeón - Macro-F1: {best_run.data.metrics.get('test_macro_f1', 0):.4f}")
     
     # Registrar en MLflow Model Registry
     model_uri = f"runs:/{best_run_id}/model"
     reg_model = mlflow.register_model(model_uri=model_uri, name=MLFLOW_MODEL_NAME)
-    print(f"✅ Registrado en Model Registry: {MLFLOW_MODEL_NAME} (Versión: {reg_model.version})")
+    print(f"[OK] Registrado en Model Registry: {MLFLOW_MODEL_NAME} (Versión: {reg_model.version})")
     
     # Promover a Staging (compatible con MLflow 2.x Stages y MLflow 3.x Aliases)
     try:
@@ -555,9 +555,9 @@ if best_run:
         )
     except Exception:
         pass
-    print(f"🚀 Versión {reg_model.version} promovida formalmente a 'Staging' en Model Registry.")
+    print(f"[INFO] Version {reg_model.version} promovida formalmente a 'Staging' en Model Registry.")
 else:
-    print("ℹ️ Sin corridas en vivo en MLflow para registrar; ejecuta el Notebook 03 primero para registrar en vivo.")"""
+    print("[INFO] Sin corridas en vivo en MLflow para registrar; ejecuta el Notebook 03 primero para registrar en vivo.")"""
     ),
     md_cell("### 3. Exportación Atómica de Modelo a Disco y Respaldo en Google Drive"),
     code_cell(
@@ -565,7 +565,7 @@ else:
 exported = False
 
 if FINAL_MODEL_PATH.exists():
-    print(f"✅ Modelo de producción ya presente en: {FINAL_MODEL_PATH} ({FINAL_MODEL_PATH.stat().st_size / (1024*1024):.2f} MB)")
+    print(f"[OK] Modelo de produccion ya presente en: {FINAL_MODEL_PATH} ({FINAL_MODEL_PATH.stat().st_size / (1024*1024):.2f} MB)")
     exported = True
 
 if not exported and best_run:
@@ -590,9 +590,9 @@ if not FINAL_MODEL_PATH.exists():
         FINAL_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
         if selected_model.resolve() != FINAL_MODEL_PATH.resolve():
             shutil.copy2(selected_model, FINAL_MODEL_PATH)
-        print(f"✅ Modelo campeón exportado exitosamente desde '{selected_model.name}' hacia: {FINAL_MODEL_PATH}")
+        print(f"[OK] Modelo de produccion exportado exitosamente desde '{selected_model.name}' hacia: {FINAL_MODEL_PATH}")
     else:
-        print(f"⚠️ No se halló un archivo .keras entrenado aún. Ejecuta el Notebook 03 para generar '{FINAL_MODEL_PATH.name}'.")
+        print(f"[ADVERTENCIA] No se hallo archivo .keras entrenado aún. Ejecuta el Notebook 03 para generar '{FINAL_MODEL_PATH.name}'.")
 
 # Sincronizar el modelo exportado y el Model Registry hacia Google Drive
 try:

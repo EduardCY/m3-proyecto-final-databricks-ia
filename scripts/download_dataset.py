@@ -63,7 +63,7 @@ def download_stream(url: str, output_path: Path, timeout: int = 60) -> bool:
                     if total_size > 0 and downloaded % (10 * 1024 * 1024) < block_size:
                         pct = (downloaded / total_size) * 100
                         logger.info(f"Progreso descarga: {downloaded / (1024*1024):.1f}/{total_size / (1024*1024):.1f} MB ({pct:.1f}%)")
-        logger.info(f"✅ Descarga completada exitosamente: {output_path.name} ({downloaded / (1024*1024):.1f} MB)")
+        logger.info(f"[OK] Descarga completada exitosamente: {output_path.name} ({downloaded / (1024*1024):.1f} MB)")
         return True
     except Exception as e:
         logger.warning(f"Error descargando desde {url}: {e}")
@@ -185,7 +185,7 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
     target_path.mkdir(parents=True, exist_ok=True)
 
     if not force_download and verify_dataset_structure(target_path, require_real=True, verbose=False):
-        logger.info(f"✅ Dataset real disponible y validado en: {target_path}")
+        logger.info(f"[OK] Dataset real disponible y validado en: {target_path}")
         return True
 
     # 1. Comprobar si existe un archivo zip en Google Drive montado
@@ -203,12 +203,12 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
                 zf.extractall(target_path)
             local_zip.unlink(missing_ok=True)
             if verify_dataset_structure(target_path, require_real=True):
-                logger.info("✅ Dataset descomprimido en local desde Google Drive con éxito.")
+                logger.info("[OK] Dataset descomprimido en local desde Google Drive con exito.")
                 return True
 
     # 2. Intentar descarga vía kagglehub (óptimo en Google Colab)
     if download_via_kagglehub(target_path):
-        logger.info("✅ Dataset descargado y descomprimido exitosamente vía kagglehub.")
+        logger.info("[OK] Dataset descargado y descomprimido exitosamente vía kagglehub.")
         return True
 
     # 3. Descarga directa streaming del ZIP oficial de Kaggle (~164.67 MB)
@@ -254,7 +254,7 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
 
             zip_tmp.unlink(missing_ok=True)
             if verify_dataset_structure(target_path, require_real=True):
-                logger.info("✅ Dataset descargado y descomprimido exitosamente en almacenamiento local.")
+                logger.info("[OK] Dataset descargado y descomprimido exitosamente en almacenamiento local.")
                 return True
         except Exception as e_extract:
             logger.warning(f"Error al extraer archivo zip: {e_extract}")
@@ -262,7 +262,7 @@ def ensure_dataset_ready(data_dir: Path = DATA_DIR, force_download: bool = False
             zip_tmp.unlink(missing_ok=True)
 
     # 4. Fallback final de contingencia
-    logger.warning("⚠️ No se pudo obtener el dataset real. Generando dataset de contingencia sintético...")
+    logger.warning("[AVISO] No se pudo obtener el dataset real. Generando dataset de contingencia sintético...")
     generate_smoke_test_dataset(target_path, samples_per_class=30)
     return False
 

@@ -229,7 +229,7 @@ def sync_dataset_to_ephemeral(
         zf.extractall(target_data_dir)
 
     temp_zip_dest.unlink(missing_ok=True)
-    logger.info("✅ Dataset desplegado en almacenamiento efímero local con CERO latencia FUSE.")
+    logger.info("[OK] Dataset desplegado en almacenamiento efímero local con CERO latencia FUSE.")
     return True
 
 
